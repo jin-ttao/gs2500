@@ -1,0 +1,100 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#f4f6f1">
+  <title>GS2500 | 24시간 후보 재생</title>
+  <link rel="stylesheet" href="./embed.css">
+  <script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
+</head>
+<body>
+  <main class="replay-shell">
+    <header class="replay-header">
+      <a class="brand" href="./" aria-label="GS2500 실험실로 돌아가기">
+        <span class="brand-mark">G</span>
+        <span><b>GS2500</b><small>RETAIL DECISION LAB</small></span>
+      </a>
+      <div class="header-meta">
+        <span class="status-dot"></span>
+        <span>합성 점포 진열 후보</span>
+        <span class="header-divider"></span>
+        <span id="recordId">기록 확인 중</span>
+      </div>
+    </header>
+
+    <section class="replay-intro" aria-labelledby="replayTitle">
+      <div>
+        <span class="eyebrow">RECORDED DAY / SINGLE CANDIDATE</span>
+        <h1 id="replayTitle">24시간 엔진 결과의<br>사전 계산·재생</h1>
+      </div>
+      <p>24시간 계산에서 기록한 대표 방문 경로를 24초로 압축해 보여줍니다. 화면 속 방문은 서로 다른 시점의 실제 기록을 겹친 것으로, 실제 동시 방문이나 혼잡 장면이 아닙니다.</p>
+    </section>
+
+    <section class="replay-layout">
+      <div class="stage-card">
+        <div class="stage-heading">
+          <div>
+            <span class="live-chip"><i></i> RECORDED REPLAY</span>
+            <b id="candidateName">후보 기록 불러오는 중</b>
+          </div>
+          <div class="source-clock">
+            <small>원본 24시간 위치</small>
+            <time id="dayClock">00:00:00</time>
+          </div>
+        </div>
+
+        <div class="viewport" aria-label="기록된 대표 방문의 3D 재생">
+          <div id="webgl"></div>
+          <div id="shelfLabel" class="world-label"><i></i><span><b>행사 매대</b><small id="levelLabel">3층 선택</small></span></div>
+          <div id="agentLabel" class="agent-label" hidden><b id="sceneAgentName"></b><span id="sceneAgentState"></span></div>
+          <div class="viewport-note"><span id="visitCount">대표 방문 준비 중</span><small>서로 다른 시점의 기록 · 실제 동시 방문 아님</small></div>
+          <div id="loading" class="loading" role="status">
+            <span class="spinner"></span>
+            <b>사전 계산 기록을 불러옵니다.</b>
+            <small id="loadingDetail">day-replay/1과 3D 공간을 확인하고 있습니다.</small>
+          </div>
+        </div>
+
+        <div class="timeline" aria-label="재생 진행률">
+          <div class="timeline-track"><i id="progressBar"></i></div>
+          <div><span id="replayTime">00:00 / 00:24</span><span id="replayState">불러오는 중</span></div>
+        </div>
+
+        <div class="controls" role="group" aria-label="대표 방문 재생 제어">
+          <button id="playButton" type="button" class="primary" disabled><span>▶</span> 재생</button>
+          <button id="pauseButton" type="button" disabled><span>Ⅱ</span> 일시정지</button>
+          <button id="restartButton" type="button" disabled><span>↺</span> 처음부터</button>
+        </div>
+      </div>
+
+      <aside class="result-panel" aria-label="기록된 24시간 최종 결과">
+        <div class="panel-kicker">24H ABSOLUTE RESULT</div>
+        <h2>후보의 24시간 최종값</h2>
+        <p>아래 수치는 재생 화면에서 추정한 값이 아니라 기록된 엔진의 최종 스냅샷입니다.</p>
+
+        <dl class="metrics">
+          <div><dt>결제매출</dt><dd id="revenueValue">-</dd></div>
+          <div><dt>매출총이익</dt><dd id="profitValue">-</dd></div>
+          <div><dt>입장</dt><dd id="enteredValue">-</dd></div>
+          <div><dt>구매</dt><dd id="buyersValue">-</dd></div>
+        </dl>
+
+        <div class="provenance">
+          <div><span>행동 판단</span><b id="engineLabel">로컬 규칙 · API 미호출</b></div>
+          <div><span>페르소나</span><b>Nemotron Korea 합성</b></div>
+          <div><span>표시 방식</span><b>사전 계산 기록 재생</b></div>
+        </div>
+
+        <div class="truth-note" role="note">
+          <b>표시 범위</b>
+          <p>합성 점포와 합성 페르소나의 로컬 실험입니다. 실제 GS25 데이터, 실제 고객 행동 예측, 인과적으로 입증된 매출 상승을 뜻하지 않습니다.</p>
+        </div>
+        <p id="recordSource" class="record-source"></p>
+      </aside>
+    </section>
+  </main>
+
+  <script type="module" src="./embed.js"></script>
+</body>
+</html>

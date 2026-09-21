@@ -9,7 +9,7 @@ await rm(output, { recursive: true, force: true });
 await mkdir(join(output, 'vendor', 'three'), { recursive: true });
 
 const modules = [
-  'app.js', 'card-worlds.js', 'characters.js', 'lab.js', 'maps.js',
+  'app.js', 'embed.js', 'embed.css', 'card-worlds.js', 'characters.js', 'lab.js', 'maps.js',
   'model.js', 'navigation.js', 'store.js', 'world.js', 'styles.css',
   'context.js', 'merchandising.js', 'day.js', 'simulation-cards.css', 'store-pages.css',
   'summary-replay.js', 'replay-recorder.js', 'replay-worker.js',
@@ -29,6 +29,8 @@ await Promise.all([
   cp(join(three, 'examples', 'jsm'), join(output, 'vendor', 'three', 'examples', 'jsm'), { recursive: true }),
   cp(join(three, 'LICENSE'), join(output, 'vendor', 'three', 'LICENSE')),
 ]);
-const html = await readFile(join(root, 'index.html'), 'utf8');
-await writeFile(join(output, 'index.html'), html.replaceAll('./node_modules/three/', './vendor/three/'));
-console.log('Built demo/dist — serve this directory with any static HTTP server.');
+for (const name of ['index.html', 'embed.html']) {
+  const html = await readFile(join(root, name), 'utf8');
+  await writeFile(join(output, name), html.replaceAll('./node_modules/three/', './vendor/three/'));
+}
+console.log('Built demo/dist. Serve this directory with any static HTTP server.');
