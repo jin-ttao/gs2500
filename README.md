@@ -1,4 +1,4 @@
-# GS2500 — 동시 3D 매장 실험실
+# GS2500: 동시 3D 매장 실험실
 
 합성 점포 9곳 × 진열 후보 4개를 **36개의 실제 3D 세계**에서 비교하는 해커톤 데모입니다.
 점포마다 후보 4개를 2×2로 묶습니다. 카드는 참고 이미지의 세로 비율을 유지하며,
@@ -20,11 +20,11 @@ GS와의 공식 제휴·승인을 의미하지 않습니다. NVIDIA 공개 **합
 GS그룹 x 랄프톤 해커톤의 전체 제품은 점포별 전년 동기 대비 매출 분석에서 출발해
 진열 후보 비교, 매니저 승인·점주 검토·4주 후 회고까지 연결하는 데스크톱 웹앱을 목표로 합니다.
 판매·재고·성과는 합성 데모 데이터입니다. 아래 `demo/`는 현재 구현된 24시간 3D 실험실이며,
-전체 제품의 30일 비교·승인·회고 흐름과의 통합이 모두 완료되었다는 뜻은 아닙니다.
+전체 제품의 성과 분석·승인·회고 흐름과의 통합이 모두 완료되었다는 뜻은 아닙니다.
 
 - 팀 공통 제품·구현 맥락: [docs/shared-context.md](docs/shared-context.md)
 - 제품 방향과 역할별 경험: [docs/product-brief.md](docs/product-brief.md)
-- 실행 전 조정할 단일 `/goal` 프롬프트 초안: [goal-prompt.md](goal-prompt.md)
+- 메인 허브 작업에 입력할 단일 `/goal` 프롬프트: [goal-prompt.md](goal-prompt.md)
 - 3분 발표 콘티와 구현 인계 HTML: [design/reference/gs2500-storyboard-handoff.html](design/reference/gs2500-storyboard-handoff.html)
 - 3D 시뮬레이션 작업 브랜치: `codex/multi-store-live-3d` (`main`에 병합)
 
