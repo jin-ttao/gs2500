@@ -13,7 +13,7 @@ export const DAILY_EVENTS=Object.freeze([
 ].map(e=>Object.freeze({...e,source:'authored-daily-assumption',status:'assumed',confidence:.25,description:'실측·일기예보·실제 행사 일정이 아닌 하루 시나리오 가정'})));
 export const dailyEventsFor=mapId=>DAILY_EVENTS.filter(e=>!e.maps||e.maps.includes(mapId));
 
-export function createDayPlan({population=1000,duration=86400,seed=42,mapId='office',profileWeights=PROFILES.map(()=>1),eventSchedule=[],entryProbability}={}){
+export function createDayPlan({population=1000,duration=86400,seed=42,mapId='office',profileWeights=PROFILES.map(()=>1),eventSchedule=[],entryProbability,personaCatalog}={}){
   if(!Number.isSafeInteger(population)||population<0)throw new RangeError('population must be a nonnegative integer');
   if(!Number.isFinite(duration)||duration<=0)throw new RangeError('duration must be positive finite seconds');
   if(entryProbability!==undefined&&(!Number.isFinite(entryProbability)||entryProbability<0||entryProbability>1))throw new RangeError('entryProbability must be between 0 and 1');
@@ -27,19 +27,32 @@ export function createDayPlan({population=1000,duration=86400,seed=42,mapId='off
     return {start,end,weight,cumulative:total};
   });
   const weightTotal=profileWeights.reduce((sum,value)=>sum+value,0);
+  if(personaCatalog&&(!Array.isArray(personaCatalog)||personaCatalog.length<population))throw new RangeError('Unique persona catalog must cover the entire potential cohort');
+  // A seeded permutation, not sampling the same five templates with replacement.
+  // This is a convenience sample of synthetic records, not fitted local demographics.
+  const personaOrder=personaCatalog?.map((_,index)=>index).sort((a,b)=>randomAt(a,8010,seed)-randomAt(b,8010,seed)||a-b);
   return Array.from({length:population},(_,id)=>{
+    const personaIndex=personaOrder?.[id],persona=personaIndex===undefined?null:personaCatalog[personaIndex];
+    let personTotal=0;
+    const personSegments=persona?segments.map(segment=>{
+      const hour=Math.min(23,Math.floor((segment.start+segment.end)/2/duration*24));
+      const factor=Math.max(.05,Math.min(3,persona.schedule?.hourlyWeights?.[hour]??1));
+      const weight=segment.weight*factor;personTotal+=weight;
+      return {...segment,weight,cumulative:personTotal};
+    }):segments;
     // Stratification keeps exactly population potential people while seeded jitter
     // and all exogenous random values remain independent of the candidate layout.
-    const quantile=(id+randomAt(id,8000,seed))/Math.max(1,population),target=quantile*total;
-    const segment=segments.find(s=>target<s.cumulative)??segments.at(-1);
+    const quantile=(id+randomAt(id,8000,seed))/Math.max(1,population),target=quantile*(persona?personTotal:total);
+    const segment=personSegments.find(s=>target<s.cumulative)??personSegments.at(-1);
     const rawTime=segment.start+(target-(segment.cumulative-segment.weight))/segment.weight*(segment.end-segment.start);
     const time=Math.min(duration,Math.max(Math.min(.05,duration),Math.ceil(rawTime*20-1e-8)/20));
     let sample=randomAt(id,1,seed)*weightTotal,profileIndex=profileWeights.length-1;
     for(let i=0;i<profileWeights.length;i++){sample-=profileWeights[i];if(sample<0){profileIndex=i;break;}}
+    if(personaIndex!==undefined)profileIndex=personaCatalog[personaIndex].archetypeIndex??0;
     const hour=Math.min(23,Math.floor(time/duration*24));
-    const needProbability=entryProbability??Math.max(.3,Math.min(.84,.54+(hourly[hour]-1)*.08+(profileIndex===1?.07:profileIndex===4?-.06:0)));
-    return Object.freeze({id,time,profileIndex,entryDraw:randomAt(id,8001,seed),needProbability,hour,source:'seeded-daily-assumption'});
-  });
+    const needProbability=entryProbability??Math.max(.3,Math.min(.84,.54+(hourly[hour]-1)*.08+(persona?0:profileIndex===1?.07:profileIndex===4?-.06:0)));
+    return Object.freeze({id,time,profileIndex,personaIndex,personaSourceId:personaIndex===undefined?null:personaCatalog[personaIndex].source.id,entryDraw:randomAt(id,8001,seed),needProbability,hour,source:'seeded-daily-assumption'});
+  }).sort((a,b)=>a.time-b.time||a.id-b.id);
 }
 
 const quantityMap=(value,label)=>{

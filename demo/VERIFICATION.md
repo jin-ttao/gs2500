@@ -1,6 +1,89 @@
-# Verification — 2026-09-21
+# Verification — updated 2026-09-22
 
-## Latest: sixteen live cards, four candidates, paged stores, slower playback
+## Latest: persona causality and JEV integration
+
+- `npm test`: **159/159 passed** (23.65 seconds); `npm run build` passed.
+- Loaded **1,000 unique original NVIDIA synthetic source records**, with pinned revision, CC BY attribution, and raw narratives preserved. Budgets, affinities, timing weights and all store data remain authored assumptions, not observed Korean shoppers/POS data.
+- Fixed explicit shopping goals, new-product avoidance, negative product memories, price sensitivity, and the arbitrary ₩1,700 exploration cutoff. Current missions respect visit hours. Technical persona buckets no longer inherit old student/developer behaviour coefficients.
+- Candidate layouts change ordinary fixture/fridge SKU coordinates as well as promotion shelves. Actual destinations and approach points use the same placements as the 3D renderers.
+- Paired **3 stores × 4 plans × 1,000 potential people × 24h**: all completed; **5,432 payments / 9,506 paid units / 288 stock identities** checked. See [BEHAVIOR-AUDIT.md](./BEHAVIOR-AUDIT.md) for full tables, source hashes and limitations.
+- Actual JEV entry calls succeeded. Destination requests were rejected; two diagnosed responses were upstream **HTTP 429 / rate_limit_exceeded**, without Retry-After. Full real-JEV purchasing flow and behavioural accuracy are **not verified**. See [JEV-VERIFICATION.md](./JEV-VERIFICATION.md).
+- Mocked JEV integration tests cover all three decision stages, illegal responses, timeout/budgets, exact clock freeze during network latency, pause holding an in-flight response, and reset generation isolation. No GPT or local fallback.
+- All 1,000 source personas' promotional shelf contexts fit the local request ceiling in an offline check: peak **111,319 bytes / 131,072 limit**. This is not a provider token-capacity claim.
+- Actual local server requests: `/.env.local` and `/server.mjs` → **404**, source cohort JSON and runtime modules → **200**. Secrets remain Git-ignored and outside the static build.
+- Browser: all **36 worlds** completed 24h; calculation **57.6s**, adjustable replay separate. Samsung A/B/C/D final revenue **1,646,300 / 1,857,300 / 1,621,500 / 1,524,400**, matching the independent audit. These are simulated payments, not actual store revenue.
+- Browser model selector visibly distinguishes local/API modes, disables comparison replay for unfinished JEV execution, shows remaining server quota and latest **Gateway 429**, and makes no API request merely by selecting a mode. Desktop 1280px and mobile 390px DOM widths had no horizontal overflow.
+- Approval receipts now include engine and persona provenance; preserved older approvals are labelled as older five-template local results rather than silently relabelled as NVIDIA/JEV outputs.
+
+The following sections are historical checks of earlier engine versions. Their
+old revenue baselines and earlier “not connected” statements are **not** current results.
+
+## Historical: recorded visits, adjustable comparison playback
+
+The default UI is now `빠른 비교`, with `느리게 / 기본 / 빠르게` presentation
+speeds (0.5 / 1 / 2). A fixed-duration marketing claim was removed at the user's
+request. The default clip spans 30 presentation seconds, independent of engine
+preparation. `실시간 관찰` retains its original shared 32× simulation clock.
+
+- `npm test`: **109/109 passed** (18.83 seconds). `npm run build`,
+  `node --check app.js` and `git diff --check` passed.
+- Three bounded Web Workers compute the original daily engine without modifying
+  `world.js`, `context.js`, `day.js`, persona scores, stock or payment policy.
+  Current browser preparation for **all 36 full-day candidates** took **37.8s**;
+  this is observed local timing, not a guarantee on other devices.
+- Each recording nominates up to 12 actual visitors stratified over the day.
+  Motion/turn/state-transition poses and original basket changes are recorded.
+  Visits overlap in presentation only; no extra shopping stops or sales are added.
+  Explicit notices distinguish this from real simultaneous occupancy.
+- Recorder baseline: Samsung A remains **605 entrants / 438 buyers / 689 units /
+  KRW 1,603,200**, with 12 retained visits and 97 actual accounting checkpoints.
+- Browser: all 36 candidates reached **86,400 seconds**. After changing replay
+  speed from 1 to 0.5, pausing, then finishing at 2, all twelve previously audited
+  everyday-store candidate revenues matched their original values exactly.
+- At paused presentation time **16.4042s**, all four visible Samsung cards showed
+  **12 recorded visitors**. A later DOM check found unchanged coordinates and
+  accounting. The expanded renderer matched the selected visual-world positions
+  and presentation time; approval stayed disabled before playback completion.
+- Unit checks preserve final accounting at different durations, frame partitions
+  and speed changes; speed changes do not jump the clock. Reset preserves speed
+  and original recordings; completed clips never loop autonomously.
+- Independent nine-map shortened-day integration sampled **79,478 replay poses**:
+  all walkable. Seven boundary-interpolation cases held the previous real tick
+  instead of constructing a fictitious detour. This is not proof against every
+  possible future layout or recording.
+- **1440×900** retained ~327.5×345.97px cards with no horizontal overflow;
+  **390×844** also had no document overflow. Mobile controls and representative
+  visitors were visually inspected. Temporary viewport overrides were reset.
+- Source UI, runtime DOM and docs contain no superseded fixed-duration wording.
+  Initial preparation can be cancelled; scene display and live-world state are
+  separate. Recordings are memory-only and must be rebuilt after a reload.
+- Accounting uses actual 15-minute checkpoints, not interpolated money. Final
+  values use the complete original snapshot. Summary export retains all payment
+  events, explicitly marks omitted non-payment events, and is not a full ledger.
+
+## Historical: reference card proportions and 32× default
+
+The user relaxed the requirement to squeeze all 16 cards into one viewport.
+The current design keeps four alternatives per store and four stores per page,
+but prioritizes the supplied card proportions and allows vertical scrolling.
+The default shared clock is now 32× rather than 4×; explicit 1× and 4× controls
+remain available for close observation. No independent animation multiplier was added.
+
+- `npm test`: **88/88 passed** (22.4 seconds), including default 32× and an explicit
+  0.5-second wall increment advancing every one of 36 worlds by 16 seconds.
+- `npm run build` passed. Tests retain explicit slow-speed and pause coverage.
+- Live browser check after selecting 32×: **24.849 wall seconds → 795.45 simulated
+  seconds (32.011×)**. All 36 source times were exactly equal at the sample.
+- At an actual **1440×900** viewport, the new card was about **327.5×346px**
+  (width/height ≈ 0.947); all sixteen scene rectangles retained about **1.78:1**.
+  The store page is taller than the viewport and scrolls vertically. No footer
+  exceeded its card, and document width stayed 1440px. The former scene rectangle
+  at the same width was about 314.5×77.25px (~4.07:1), creating excess side space.
+- At **390×844**, cards measured **163.5×172.72px**, scenes about **151.8×85.36px**;
+  no footer child overflow or horizontal document overflow was found. Next-page
+  navigation retained four candidates per store and the default 32× setting.
+
+## Historical: sixteen live cards, four candidates, paged stores, slower playback
 
 This section supersedes the older three-store/nine-world board and 900× default
 below. The current board owns **nine synthetic stores × four real alternatives =

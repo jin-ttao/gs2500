@@ -29,7 +29,7 @@ export const SPEEDS = [1,4,16,32,64,128,300,900,1800];
 export const SIMULATION_STEP = .05;
 
 /** One clock owns every spatial world, including stores outside the visible page. */
-export function createLab({limit=1000,speed=4,storeGroup='all',mode='day',duration=86400}={}) {
+export function createLab({limit=1000,speed=32,storeGroup='all',mode='day',duration=86400,personaCatalog,decisionProvider}={}) {
   if(!Number.isInteger(limit)||limit<1||limit>10000)throw new RangeError('잠재 고객 수는 1~10,000 사이 정수여야 합니다.');
   if(!['day','visits'].includes(mode))throw new RangeError('지원하지 않는 실험 방식입니다.');
   if(!Number.isFinite(duration)||duration<=0||duration>86400)throw new RangeError('실험 기간은 0초 초과, 24시간 이하여야 합니다.');
@@ -45,7 +45,7 @@ export function createLab({limit=1000,speed=4,storeGroup='all',mode='day',durati
       const id=store.id+':'+scenario;
       return {id,store,scenario,status:'ready',error:null,world:createWorld({
         limit,mode,duration,population:limit,scenario,mapId:store.mapId,storeId:store.id,seed:store.seed,
-        stockScale:store.stockScale,profileWeights:store.profileWeights,
+        stockScale:store.stockScale,profileWeights:store.profileWeights,personaCatalog,decisionProvider,
         runId:sessionId+':'+generation+':'+id,
       })};
     }));
@@ -73,8 +73,25 @@ export function createLab({limit=1000,speed=4,storeGroup='all',mode='day',durati
     lab.speed=value;backlog=0;measurementReal=measurementSim=0;lab.effectiveSpeed=0;
   };
   lab.reset=()=>{
+    lab.runs.forEach(run=>run.world.cancelDecisions());
     generation++;ticks=0;backlog=0;measurementReal=measurementSim=0;
     lab.time=0;lab.running=false;lab.effectiveSpeed=0;lab.runs=makeRuns();
+  };
+  lab.setDecisionProvider=provider=>{decisionProvider=provider;lab.reset();};
+  let decisionWait=null;
+  lab.settleDecisions=()=>{
+    if(decisionWait)return decisionWait;
+    // Stable run order also makes a finite shared API budget reproducible.
+    decisionWait=(async()=>{
+      const activeGeneration=generation;
+      for(const run of lab.runs){
+        if(activeGeneration!==generation||!lab.running)break;
+        if(!unfinished(run)||!run.world.hasPendingDecisions())continue;
+        try{await run.world.settleDecisions({shouldContinue:()=>lab.running&&activeGeneration===generation});}
+        catch(error){if(activeGeneration!==generation)break;run.status='failed';run.error=String(error.code??error.message??error);lab.running=false;}
+      }
+    })().finally(()=>{decisionWait=null;});
+    return decisionWait;
   };
   lab.setStoreGroup=id=>{
     const group=STORE_GROUPS.find(group=>group.id===id);
@@ -86,6 +103,7 @@ export function createLab({limit=1000,speed=4,storeGroup='all',mode='day',durati
     if(!Number.isFinite(realSeconds)||realSeconds<0)throw new RangeError('시간 간격은 유한한 0 이상의 수여야 합니다.');
     if(!(budgetMs>0))throw new RangeError('계산 시간 예산은 양수여야 합니다.');
     if(!lab.running)return {simulatedDelta:0,steps:0};
+    if(lab.runs.some(run=>unfinished(run)&&run.world.hasPendingDecisions())){backlog=0;lab.effectiveSpeed=0;return {simulatedDelta:0,steps:0,pending:true};}
     backlog+=realSeconds*lab.speed;
     const start=performance.now();let steps=0,simulatedDelta=0;
     while(backlog+1e-9>=Math.min(SIMULATION_STEP,mode==='day'?duration-lab.time:SIMULATION_STEP)){
@@ -115,6 +133,7 @@ export function createLab({limit=1000,speed=4,storeGroup='all',mode='day',durati
       }
       ticks+=Math.round(step/SIMULATION_STEP);steps++;simulatedDelta+=step;backlog=Math.max(0,backlog-step);
       lab.time=mode==='day'&&lab.time+step>=duration-1e-9?duration:ticks*SIMULATION_STEP;
+      if(activeRuns.some(run=>run.world.hasPendingDecisions())){backlog=0;break;}
       if(!lab.runs.some(unfinished)){lab.running=false;backlog=0;break;}
     }
     measurementReal+=realSeconds;measurementSim+=simulatedDelta;

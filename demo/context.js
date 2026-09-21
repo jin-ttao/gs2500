@@ -1,8 +1,9 @@
 import { PRODUCTS, PRODUCT_MAP, randomAt } from './model.js';
 import { getMap } from './maps.js';
 import { getFixturePlacements } from './merchandising.js';
+import { deriveBehavior, productPolicy } from './behavior.js';
 
-export const ENGINE=Object.freeze({type:'local-rule',version:'2',jev:Object.freeze({status:'not-connected',called:false})});
+export const ENGINE=Object.freeze({type:'local-rule',version:'3',behavior:'bounded-explicit-policy/1',jev:Object.freeze({status:'not-connected',called:false})});
 export const PROVENANCE=Object.freeze({catalog:'authored-fixture',trend:'assumed',events:'authored-compressed-demo',state:'live-spatial-world',modelCall:'none'});
 // Compressed simulation seconds, never claims about a real festival, weather or trend.
 export const EXOGENOUS_EVENTS=Object.freeze([
@@ -47,18 +48,23 @@ export function buildDecisionContext(world,agent){
     const facing=planar>0?(Math.sin(agent.heading)*dx+Math.cos(agent.heading)*dz)/planar:1;
     const shelfStock=world.stock[p.id],backroomStock=world.backroomStock?.[p.id]??0;
     const fact={...clone(placement),name:p.name,category:p.category,price:p.price,stock:shelfStock,shelfStock,backroomStock,totalAvailableStock:shelfStock+backroomStock,shelfCapacity:world.shelfCapacity?.[p.id]??null,availability:shelfStock>0?'on-shelf':backroomStock>0?'shelf-gap':'store-total-shortage',isNew:p.isNew,launchDaysAgo:p.launchDaysAgo,tags:[...p.tags],trend:{...p.trend},
-      distance,facing,canSee:distance<=capability.maxDistance&&facing>=Math.cos(capability.fieldOfViewDegrees*Math.PI/360),
+      distance,facing,canSee:distance<=capability.maxDistance&&facing>=Math.cos(capability.fieldOfViewDegrees*Math.PI/360),canReach:distance<=3.2,
       neighbors:placement.neighbors.map(neighbor=>({...neighbor,category:PRODUCT_MAP[neighbor.productId].category,stock:world.stock[neighbor.productId]}))};
     if(!nearest.has(p.id)||distance<nearest.get(p.id).distance)nearest.set(p.id,fact);
   }
-  const observedProducts=[...nearest.values()],remainingBudget=agent.profile.budget-agent.spent,basket=agent.basket.map(p=>p.id);
-  const constraints={budget:agent.profile.budget,remainingBudget,maxBasket:3,currentBasketSize:basket.length,basket:[...basket],mustHaveStockToPick:true,oneUnitPerAction:true};
-  const allowedActions=observedProducts.filter(p=>p.canSee&&p.price<=remainingBudget&&!basket.includes(p.productId)&&basket.length<3).map(p=>({type:p.stock>0?'pick':'record-unmet-demand',productId:p.productId,locationId:p.locationId}));
+  const observedProducts=[...nearest.values()],remainingBudget=agent.profile.budget-agent.spent,basket=agent.basket.map(p=>p.id),behavior=deriveBehavior(agent.profile);
+  for(const fact of observedProducts){
+    const policy=productPolicy(agent.profile,fact,{basket,spent:agent.spent,memory:agent.memory,behavior});
+    const {behavior:sharedBehavior,...inputs}=policy;
+    fact.behaviorPolicy=inputs;
+  }
+  const constraints={budget:agent.profile.budget,remainingBudget,maxBasket:behavior.maxBasket,currentBasketSize:basket.length,basket:[...basket],mustHaveStockToPick:true,oneUnitPerAction:true,behavior};
+  const allowedActions=observedProducts.filter(p=>p.canSee&&p.canReach&&p.behaviorPolicy.allowed).map(p=>({type:p.stock>0?'pick':'record-unmet-demand',productId:p.productId,locationId:p.locationId}));
   allowedActions.push({type:'skip'});
   return {
     schemaVersion:'shelf-context/1',engine:clone(ENGINE),runId:world.runId,storeId:world.storeId,mapId:world.mapId,scenario:world.scenario,time:world.time,
     observer:{agentId:agent.id,profileIndex:agent.profileIndex,position:observerPosition,heading:agent.heading,capability},
-    persona:clone(agent.profile),memory:agent.memory.map(m=>({...m})),basket,spent:agent.spent,
+    persona:clone(agent.profile),memory:clone(agent.memory??[]),behavior,basket,spent:agent.spent,
     fixture:fixture?{id:fixture.id,type:fixture.type,position:[fixture.x,0,fixture.z],rotation:fixture.rotation,scale:fixture.scale}:null,
     neighborhood:{id:map.id,label:map.name,region:map.region??null,source:'authored-map',status:'assumed'},
     observedProducts,activeEvents:getActiveEvents(world),allowedActions,constraints,
@@ -73,7 +79,7 @@ const neighborhoodBias={office:{meal:.035,drink:.025},express:{meal:.04},residen
 
 /** Bounded, inspectable local rules. No JEV/network/model call occurs here. */
 export function decideLocally(context,seed=42){
-  const modifiers=eventModifiers(context.activeEvents),profile=context.persona,agentId=context.observer.agentId;
+  const modifiers=eventModifiers(context.activeEvents),profile=context.persona,agentId=context.observer.agentId,behavior=deriveBehavior(profile);
   const stationFeature=Math.abs([...context.fixture?.id??''].reduce((s,c)=>s+c.charCodeAt(0),0));
   const observations=context.observedProducts.map(fact=>{
     const index=PRODUCTS.findIndex(p=>p.id===fact.productId),levelBase=context.fixture?.type==='promo'?[.30,.73,.82,.38][fact.level-1]:.87;
@@ -82,20 +88,57 @@ export function decideLocally(context,seed=42){
     const noticeDraw=randomAt(agentId,1000+stationFeature*31+index,seed),noticed=noticeDraw<noticeProbability;
     const neighborPairs=fact.neighbors.filter(n=>n.stock>0&&complementary(fact.category,n.category)).length;
     const basketComplement=context.basket.some(id=>complementary(fact.category,PRODUCT_MAP[id].category));
-    const contributions={base:.11,affinity:profile.affinity[fact.category]*.57,novelty:fact.isNew?(context.observer.profileIndex===3?.07:.03):0,trend:clamp(fact.trend.strength,0,1)*.065,
+    const policy=productPolicy(profile,fact,{basket:context.basket,spent:context.spent,memory:context.memory,behavior});
+    const contributions={base:.11,affinity:(profile.affinity?.[fact.category]??0)*.57,novelty:fact.isNew?(profile.source?.dataset==='nvidia/Nemotron-Personas-Korea'?.02+.08*(profile.behavior?.noveltySeeking??.5):context.observer.profileIndex===3?.07:.03):0,trend:clamp(fact.trend.strength,0,1)*.065,
       adjacentComplement:Math.min(.06,neighborPairs*.025),basketComplement:basketComplement?.035:0,neighborhood:neighborhoodBias[context.mapId]?.[fact.category]??0,
       localEvent:clamp((modifiers.categoryMultipliers[fact.category]-1)*.22+(modifiers.productBoosts[fact.productId]??0),-.10,.16),
-      exactPosition:clamp((1.5-fact.distance)*.028-Math.abs(fact.local[0])*.008,-.07,.025),individualVariation:(randomAt(agentId,2000+index,seed)-.5)*.08};
+      exactPosition:clamp((1.5-fact.distance)*.028-Math.abs(fact.local[0])*.008,-.07,.025),individualVariation:(randomAt(agentId,2000+index,seed)-.5)*.08,
+      missionFit:policy.missionFit,pricePenalty:policy.pricePenalty,memory:policy.memoryAdjustment};
     const score=clamp(Object.values(contributions).reduce((sum,n)=>sum+n,0),.04,.95);
     const affordable=fact.price<=context.constraints.remainingBudget,alreadyPicked=context.basket.includes(fact.productId),withinLimit=context.basket.length<context.constraints.maxBasket;
+    const reachable=fact.canReach!==false,actionAllowed=!context.allowedActions||context.allowedActions.some(action=>['pick','record-unmet-demand'].includes(action.type)&&action.productId===fact.productId&&action.locationId===fact.locationId);
     return {productId:fact.productId,locationId:fact.locationId,noticed,noticeProbability,noticeDraw,noticeContributions,purchaseProbability:score,score,contributions,
-      eligible:noticed&&affordable&&!alreadyPicked&&withinLimit,
-      reason:!noticed?'not-noticed':!affordable?'budget':alreadyPicked?'already-picked':!withinLimit?'basket-limit':fact.stock<=0?'stockout':'considered'};
+      policy:{allowed:policy.allowed,reasons:policy.reasons,evidence:policy.evidence},
+      utilityInputs:{price:fact.price,remainingBudget:policy.remainingBudget,budgetShare:policy.budgetShare,priceSensitivity:policy.priceSensitivity,missionFit:policy.missionFit,memoryAdjustment:policy.memoryAdjustment},
+      eligible:noticed&&policy.allowed&&reachable&&actionAllowed&&affordable&&!alreadyPicked&&withinLimit,
+      reason:!policy.allowed?policy.reasons[0]:!reachable?'not-reachable':!noticed?'not-noticed':!affordable?'budget':alreadyPicked?'already-picked':!withinLimit?'basket-limit':!actionAllowed?'not-allowed-action':fact.stock<=0?'stockout':'considered'};
   });
   const ranked=observations.filter(row=>row.eligible).sort((a,b)=>b.score-a.score||a.productId.localeCompare(b.productId));
   const selected=ranked[0],fact=selected&&context.observedProducts.find(p=>p.locationId===selected.locationId);
   const purchaseDraw=selected?randomAt(agentId,3000+stationFeature*31+PRODUCTS.findIndex(p=>p.id===selected.productId),seed):null;
   const wants=selected&&purchaseDraw<selected.purchaseProbability;
   const action=wants?{type:fact.stock>0?'pick':'stockout',productId:fact.productId,locationId:fact.locationId,reason:fact.stock>0?'local-score-and-seeded-choice':'intended-purchase-unavailable'}:{type:'skip',reason:selected?'seeded-no-purchase':'no-eligible-noticed-product'};
-  return {engine:clone(ENGINE),action,observations,purchaseDraw,selectedScore:selected?.score??null,explanation:'합성 위치·미션·이웃·행사 계수를 합산한 로컬 규칙 판단. JEV 호출 없음.'};
+  return {engine:clone(ENGINE),behavior,action,observations,purchaseDraw,selectedScore:selected?.score??null,explanation:'명시적 구매 목표·금기와 제한된 문구 규칙을 적용하고 가격/남은 예산·기억·위치·이웃·행사 계수를 합산합니다. 일반적인 자연어 이해나 JEV 호출이 아닙니다.'};
+}
+
+/** Candidate-aware destination interest. The caller still validates an actual
+ * walkable approach path before moving; this never fabricates navigation. */
+export function rankStationInterest(world,agent,station) {
+  const map=getMap(world.mapId),stationId=typeof station==='string'?station:station?.id??Object.keys(world.stations??{}).find(id=>world.stations[id]===station);
+  const stationInfo=world.stations?.[stationId]??(typeof station==='object'?station:null);
+  const fixtures=map.fixtures.filter(f=>f.station===stationId),behavior=deriveBehavior(agent.profile),modifiers=eventModifiers(world.activeEvents??getActiveEvents(world));
+  const nearest=new Map();
+  for(const fixture of fixtures)for(const placement of getFixturePlacements(fixture,world.scenario)) {
+    if(fixture.type==='gondola'&&placement.side!==(fixture.side??1))continue;
+    const product=PRODUCT_MAP[placement.productId],policy=productPolicy(agent.profile,product,{basket:agent.basket,spent:agent.spent,memory:agent.memory,behavior});
+    const distance=Math.hypot(placement.position[0]-agent.position[0],placement.position[2]-agent.position[1]);
+    const shelfStock=world.stock[product.id]??0,backroomStock=world.backroomStock?.[product.id]??0;
+    const eyeFit=clamp(1-Math.abs(placement.position[1]-(agent.profile.age>=60?1.48:1.6))*.28,.4,1);
+    const contributions={affinity:(agent.profile.affinity?.[product.category]??0)*.57,missionFit:policy.missionFit,
+      pricePenalty:policy.pricePenalty,memory:policy.memoryAdjustment,eyeFit:eyeFit*.07,
+      exactPosition:-Math.abs(placement.local[0])*.012-distance*.012,
+      localEvent:clamp((modifiers.categoryMultipliers[product.category]-1)*.15+(modifiers.productBoosts[product.id]??0),-.1,.15)};
+    const score=Object.values(contributions).reduce((sum,value)=>sum+value,.16);
+    // A shopper may discover an empty shelf on arrival. Do not grant advance
+    // omniscience of stock and erase the very unmet-demand events being tested.
+    const eligible=policy.allowed;
+    const row={productId:product.id,locationId:placement.locationId,position:[...placement.position],price:product.price,
+      shelfStock,backroomStock,eligible,policy,contributions,score:eligible?score:-Infinity};
+    if(!nearest.has(product.id)||row.score>nearest.get(product.id).score)nearest.set(product.id,row);
+  }
+  const products=[...nearest.values()],ranked=products.filter(row=>row.eligible).sort((a,b)=>b.score-a.score||a.productId.localeCompare(b.productId));
+  return {stationId,score:ranked.length?Math.max(.01,ranked[0].score)+Math.min(.06,(ranked.length-1)*.01):-Infinity,
+    eligibleProductIds:ranked.map(row=>row.productId),products,behavior,
+    approachSlots:(stationInfo?.slots??[]).map(point=>[...point]),requiresPathValidation:true,
+    reason:ranked.length?'policy-price-and-current-plan':'no-eligible-product'};
 }

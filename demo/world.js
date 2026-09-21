@@ -2,24 +2,27 @@ import { PROFILES, PRODUCTS, PRODUCT_MAP, SCENARIOS, randomAt } from './model.js
 
 import { getMap, mapStations, checkoutPoint } from './maps.js';
 import { createNavigation } from './navigation.js';
-import { ENGINE, PROVENANCE, EXOGENOUS_EVENTS, buildDecisionContext, decideLocally, getActiveEvents, eventModifiers, freezeRecord } from './context.js';
+import { ENGINE, PROVENANCE, EXOGENOUS_EVENTS, buildDecisionContext, decideLocally, getActiveEvents, eventModifiers, freezeRecord, rankStationInterest } from './context.js';
 import { createDayPlan, createDayStats, dailyEventsFor, splitDayInventory } from './day.js';
+import { createVisitPersona } from './personas.js';
 
 const defaultNavigation=createNavigation();
 export const OBSTACLES=defaultNavigation.obstacles;
 export const STATIONS=mapStations(getMap());
 export const {isWalkable,findPath}=defaultNavigation;
-export const STATE_NAMES={walking:'이동',browsing:'상품 비교',reaching:'상품 집기',queue:'계산 대기',paying:'결제',exiting:'퇴장',done:'방문 완료'};
+export const STATE_NAMES={walking:'이동',browsing:'상품 비교',deciding:'JEV 판단 대기',reaching:'상품 집기',queue:'계산 대기',paying:'결제',exiting:'퇴장',done:'방문 완료'};
 const distance=(a,b)=>Math.hypot(a[0]-b[0],a[1]-b[1]);
 // Authored demo assumptions: these are not measured shelf effects or supplier costs.
 const COST_RATIO={meal:.71,drink:.64,snack:.62,health:.68};
 const PROFILE_WEIGHTS={office:[.16,.38,.12,.16,.18],compact:[.25,.13,.30,.22,.10],express:[.10,.43,.10,.24,.13],residential:[.35,.10,.30,.15,.10],cafe:[.16,.24,.12,.36,.12]};
 const storeSeed=id=>[...String(id)].reduce((seed,char)=>Math.imul(seed,31)+char.charCodeAt(0)>>>0,42);
 
-export function createWorld({mode='visits',limit=1000,population,duration=86400,maxActive,scenario='hq',mapId='office',storeId=mapId,seed=storeSeed(storeId),runId='run-1',stockScale=1,stock,totalStock,shelfStock,backroomStock,shelfCapacity,entryProbability,openingHours=[[0,24]],replenishment={},profileWeights=PROFILE_WEIGHTS[mapId]??[1,1,1,1,1],eventSchedule}={}) {
+export function createWorld({mode='visits',limit=1000,population,duration=86400,maxActive,scenario='hq',mapId='office',storeId=mapId,seed=storeSeed(storeId),runId='run-1',stockScale=1,stock,totalStock,shelfStock,backroomStock,shelfCapacity,entryProbability,openingHours=[[0,24]],replenishment={},profileWeights=PROFILE_WEIGHTS[mapId]??[1,1,1,1,1],eventSchedule,personaCatalog,decisionProvider}={}) {
   if(!['visits','day'].includes(mode))throw new RangeError('mode must be visits or day');
   if(population!==undefined&&(!Number.isSafeInteger(population)||population<0))throw new RangeError('population must be a nonnegative integer');
   if(mode==='day')limit=population??limit;
+  if(decisionProvider!==undefined&&typeof decisionProvider!=='function')throw new TypeError('decisionProvider must be a function');
+  if(personaCatalog&&(!Array.isArray(personaCatalog)||personaCatalog.length<limit||personaCatalog.some(p=>!p?.source?.id||!Number.isFinite(p.budget)||p.budget<0)||new Set(personaCatalog.map(p=>p.source.id)).size!==personaCatalog.length))throw new TypeError('personaCatalog requires unique source ids and finite budgets');
   if(!Number.isFinite(duration)||duration<=0)throw new RangeError('duration must be positive finite seconds');
   eventSchedule??=mode==='day'?dailyEventsFor(mapId):EXOGENOUS_EVENTS;
   if(!Number.isSafeInteger(limit)||limit<0)throw new RangeError('limit must be a nonnegative integer');
@@ -48,12 +51,54 @@ export function createWorld({mode='visits',limit=1000,population,duration=86400,
   const world={mode,time:0,spawned:0,completed:0,agents:[],history:[],queue:[],scenario,mapId,storeId,seed,runId,stations:STATIONS,totalTravel:0,totalVisitTime:0,
     initialStock,stock:{...initialStock},costs,paidRevenue:0,paidGrossProfit:0,paidUnits:0,buyers:0,decisions:0,purchaseDemand:0,stockoutDemand:0,missedDemand:0,
     levels:Array.from({length:4},(_,i)=>({level:i+1,exposure:0,notice:0,pick:0})),profileCounts:PROFILES.map(()=>0),profileWeights:weights,events:[],nextArrival:0,limit,maxActive,
-    engine:ENGINE,lastDecision:null,eventSchedule:freezeRecord(JSON.parse(JSON.stringify(eventSchedule))),activeEvents:[],ledgerCount:0,replenishmentEvents:[],
+    engine:decisionProvider?{type:'jev',version:'1',jev:{status:'configured-not-called',called:false,model:'typesafe-ai/jev'}}:ENGINE,lastDecision:null,eventSchedule:freezeRecord(JSON.parse(JSON.stringify(eventSchedule))),activeEvents:[],ledgerCount:0,replenishmentEvents:[],
+    personaSource:personaCatalog?{dataset:'nvidia/Nemotron-Personas-Korea',count:personaCatalog.length,synthetic:true,representative:false}:{dataset:'authored-five-profile-fixture',count:5,synthetic:true,representative:false},decisionError:null,modelCalls:0,
     day:mode==='day'?createDayStats(duration,limit):null,isComplete:mode==='visits'&&limit===0,
     initialTotalStock:{...(inventory?.total??initialStock)},backroomStock:inventory?.backroom??Object.fromEntries(PRODUCTS.map(p=>[p.id,0])),shelfCapacity:inventory?.capacity??{...initialStock},
     paidUnitsBySKU:Object.fromEntries(PRODUCTS.map(p=>[p.id,0])),returnedUnitsBySKU:Object.fromEntries(PRODUCTS.map(p=>[p.id,0])),shelfGapDemand:0,totalStockoutDemand:0,replenishments:0,replenishedUnits:0,owner:null};
   world.shelfStock=world.stock;
-  world.potentialSchedule=mode==='day'?Object.freeze(createDayPlan({population:limit,duration,seed,mapId,profileWeights,eventSchedule:world.eventSchedule,entryProbability})):null;
+  world.potentialSchedule=mode==='day'?Object.freeze(createDayPlan({population:limit,duration,seed,mapId,profileWeights,eventSchedule:world.eventSchedule,entryProbability,personaCatalog})):null;
+  const decisionQueue=[];
+  let settling=null,decisionsCancelled=false;
+  world.cancelDecisions=()=>{decisionsCancelled=true;decisionQueue.length=0;};
+  world.hasPendingDecisions=()=>decisionQueue.length>0||settling!==null;
+  // Model latency is wall-clock time only. It cannot consume simulated time,
+  // reorder picks or change which event/hour a person is responding to.
+  world.settleDecisions=({shouldContinue=()=>true}={})=>{
+    if(settling)return settling;
+    if(world.decisionError)return Promise.reject(new Error(world.decisionError));
+    settling=(async()=>{
+      try{
+        while(decisionQueue.length&&!decisionsCancelled&&shouldContinue()){
+          const item=decisionQueue.shift(),{agent,context,apply}=item;
+          const result=item.result??await decisionProvider(context);
+          if(decisionsCancelled)return;
+          // A pause can happen while a request is in flight. Retain its paid-for
+          // response without applying it or launching the next request until resume.
+          if(!shouldContinue()){decisionQueue.unshift({...item,result});return;}
+          if(result?.engine?.type!=='jev'||result?.engine?.jev?.called!==true)throw new Error('JEV provider returned an unverified decision');
+          const action=result.action;
+          const legal=context.allowedActions.some(a=>(a.type===action?.type||(a.type==='record-unmet-demand'&&action?.type==='stockout'))&&a.productId===action?.productId&&a.locationId===action?.locationId&&a.stationId===action?.stationId);
+          if(!legal)throw new Error('JEV returned an action outside the observed legal choices');
+          world.engine=result.engine;world.modelCalls++;
+          const decision=freezeRecord({context,result});world.lastDecision=decision;if(agent)agent.lastDecision=decision;
+          event(agent,'modelDecision',{engine:'jev',stage:context.schemaVersion,personaSourceId:context.persona.source?.id??null,action:result.action,trace:result.trace??null,context, result,message:'JEV 실제 응답 적용 · '+result.action.type});
+          apply(result);
+        }
+      }catch(error){
+        world.decisionError=error.upstreamStatus?`JEV_GATEWAY_${error.upstreamStatus}`:String(error.code??error.message??'JEV failed');decisionQueue.length=0;
+        world.engine={...world.engine,jev:{...world.engine.jev,status:'failed',error:world.decisionError}};
+        event(null,'modelError',{engine:'jev',message:'JEV 중단 · 로컬 규칙으로 대체하지 않음',code:world.decisionError,trace:error.trace??null});
+        throw error;
+      }finally{settling=null;}
+    })();
+    return settling;
+  };
+  function requestDecision(agent,context,apply){
+    if(agent){agent.state='deciding';agent.velocity=0;agent.stateTime=0;}
+    decisionQueue.push({agent,context:freezeRecord(context),apply});
+  }
+  const personaFor=(potential,index)=>createVisitPersona(personaCatalog?.[potential?.personaIndex??index%personaCatalog.length]??PROFILES[potential?.profileIndex??index],mode==='day'?world.time/duration*24:12);
   let potentialIndex=0,dayRequestedTime=0,dayTimeError=0,dayTick=0;
   if(mode==='day'){
     const desired=[map.width/2-.8,-map.depth/2+2.2];
@@ -77,7 +122,7 @@ export function createWorld({mode='visits',limit=1000,population,duration=86400,
   function bumpDay(key,amount=1){if(world.day){world.day[key]+=amount;world.day.hourly[dayHour()][key]+=amount;}}
   function log(a,message){a.memory.unshift({time:world.time,message});a.memory.length=Math.min(a.memory.length,6);}
   function event(a,type,details={}){
-    const record=freezeRecord({id:nextEventId++,type,time:world.time,runId,agentId:a?.id??null,profileIndex:a?.profileIndex??null,station:a?.station??null,productId:null,amount:0,message:'',source:'simulated-action',engine:'local-rule',activeEventIds:world.activeEvents.map(e=>e.id),...details});
+    const record=freezeRecord({id:nextEventId++,type,time:world.time,runId,agentId:a?.id??null,profileIndex:a?.profileIndex??null,personaSourceId:a?.profile?.source?.id??null,station:a?.station??null,productId:null,amount:0,message:'',source:'simulated-action',engine:world.engine.type,activeEventIds:world.activeEvents.map(e=>e.id),...details});
     ledger.push(record);world.ledgerCount=ledger.length;world.events.push(record);
     if(world.events.length>60)world.events.shift();
     if(['replenishmentStarted','stockTransferred','replenishmentCompleted','replenishmentInterrupted'].includes(type)){
@@ -193,23 +238,44 @@ export function createWorld({mode='visits',limit=1000,population,duration=86400,
   }
   function queuePoint(index) {return checkoutPoint(map,index);}
   function chooseDestination(a) {
-    if(a.visited.length>=a.maxStops||a.basket.length>=3||a.spent>a.profile.budget-1700){finishShopping(a);return;}
+    if(a.visited.length>=a.maxStops||a.basket.length>=3){finishShopping(a);return;}
     const choices=Object.entries(STATIONS).filter(([id])=>!a.visited.includes(id)).map(([id,s])=>{
-      const modifiers=eventModifiers(world.activeEvents);
-      let interest=id==='promo'?.58:a.profile.affinity[s.category]*modifiers.categoryMultipliers[s.category];
-      if(id==='coffee')interest*=a.profileIndex===1?1.6:.44;
-      if(a.basket.some(p=>p.category===s.category))interest*=.35;
+      const interest=rankStationInterest(world,a,{...s,id});
       const crowd=world.agents.filter(other=>other.id!==a.id&&other.station===id).length;
-      return {id,s,score:interest+.35*random(a.id,200+Object.keys(STATIONS).indexOf(id))-distance(a.position,s.slots[0])*.018-crowd*.12};
-    }).sort((a,b)=>b.score-a.score);
-    const choice=choices[0];if(!choice){finishShopping(a);return;}
+      return {id,s,interest,score:interest.score+.12*random(a.id,200+Object.keys(STATIONS).indexOf(id))-distance(a.position,s.slots[0])*.018-crowd*.12};
+    }).filter(c=>c.interest.eligibleProductIds.length>0).sort((a,b)=>b.score-a.score);
+    if(!choices.length){log(a,'남은 예산·구매 목적에 맞는 미방문 진열 없음');finishShopping(a);return;}
+    const apply=choice=>{
     a.station=choice.id;
-    const slots=[...choice.s.slots].sort((p,q)=>{
+    const slots=[...choice.s.slots].filter(p=>isWalkable(...p)).sort((p,q)=>{
       const pressure=t=>world.agents.reduce((sum,o)=>sum+(o.id!==a.id&&o.target&&distance(o.target,t)<.6?1:0),0);
-      return pressure(p)-pressure(q)||distance(a.position,p)-distance(a.position,q);
+      // Approach the actual preferred SKU, not the same hard-coded shelf point.
+      const target=choice.interest.products?.filter(p=>p.eligible).sort((a,b)=>b.score-a.score)[0]?.position;
+      const proximity=t=>target?Math.hypot(t[0]-target[0],t[1]-target[2]):distance(a.position,t);
+      return pressure(p)-pressure(q)||proximity(p)-proximity(q)||distance(a.position,p)-distance(a.position,q);
     });
-    a.reason=choice.id==='promo'?'행사 상품 확인':a.profile.mission+'에 맞는 상품 탐색';
-    log(a,choice.s.name+' 선택 · '+a.reason);go(a,slots[0]);
+    const slot=slots.find(p=>findPath(a.position,p).length);if(!slot){a.visited.push(choice.id);chooseDestination(a);return;}
+    a.reason=choice.interest.reason??a.profile.mission+'에 맞는 실제 진열 상품 탐색';
+    event(a,'destinationSelected',{destination:choice.id,candidate:scenario,eligibleProductIds:choice.interest.eligibleProductIds,score:choice.score,reason:a.reason,position:[...slot],message:choice.s.name+' 목적지 선택'});
+    log(a,choice.s.name+' 선택 · '+a.reason);go(a,slot);
+    };
+    if(decisionProvider){
+      const context={schemaVersion:'destination-context/1',runId,storeId,mapId,scenario,time:world.time,
+        persona:a.profile,memory:[...a.memory],basket:a.basket.map(p=>p.id),spent:a.spent,
+        observer:{agentId:a.id,profileIndex:a.profileIndex,position:[a.position[0],1.6,a.position[1]]},
+        constraints:{remainingBudget:a.profile.budget-a.spent,budget:a.profile.budget,maxBasket:3,currentBasketSize:a.basket.length},
+        destinations:choices.map(c=>({stationId:c.id,name:c.s.name,position:c.s.slots[0],reachable:true,score:c.score,
+          eligibleProductIds:c.interest.eligibleProductIds,
+          products:c.interest.products.map(p=>({productId:p.productId,name:PRODUCT_MAP[p.productId].name,category:PRODUCT_MAP[p.productId].category,
+            locationId:p.locationId,position:p.position,price:p.price,shelfStock:p.shelfStock,backroomStock:p.backroomStock,
+            isNew:PRODUCT_MAP[p.productId].isNew,tags:PRODUCT_MAP[p.productId].tags,trend:PRODUCT_MAP[p.productId].trend,
+            eligible:p.eligible,policy:{allowed:p.policy.allowed,reasons:p.policy.reasons,pricePenalty:p.policy.pricePenalty,missionFit:p.policy.missionFit},
+            score:p.eligible?p.score:null}))})),
+        allowedActions:[...choices.map(c=>({type:'visit',stationId:c.id})),{type:'leave'}],
+        activeEvents:world.activeEvents,day:{hour:mode==='day'?world.time/duration*24:12},
+        provenance:{layout:'authored-candidate-placement',rankings:'local-hypothesis-not-measured-preference'}};
+      requestDecision(a,context,result=>{const choice=choices.find(c=>c.id===result.action.stationId);if(result.action.type==='visit'&&choice)apply(choice);else finishShopping(a);});
+    }else apply(choices[0]);
   }
   function entryPoint(id){return [map.entry[0]+(random(id,701)-.5)*.8,map.entry[1]];}
   function spawn(potential=null) {
@@ -217,12 +283,12 @@ export function createWorld({mode='visits',limit=1000,population,duration=86400,
     let sample=random(id,1)*weightTotal,profileIndex=weights.length-1;
     for(let i=0;i<weights.length;i++){sample-=weights[i];if(sample<0){profileIndex=i;break;}}
     if(potential)profileIndex=potential.profileIndex;
-    const profile=PROFILES[profileIndex];
+    const profile=personaFor(potential,personaCatalog?id:profileIndex);
     const entry=entryPoint(id);
     if(world.agents.some(a=>distance(a.position,entry)<.65))return false;
     const a={id,profileIndex,profile,position:entry,heading:Math.PI,speed:.85+random(id,4)*.5,
       state:'walking',station:null,target:null,path:[],pathIndex:0,visited:[],basket:[],spent:0,
-      maxStops:profileIndex===1?2:2+Math.floor(random(id,8)*2),memory:[],blocked:0,paid:false,paidAt:null,
+      maxStops:profile.behavior?.maxStops??(profileIndex===1?2:2+Math.floor(random(id,8)*2)),memory:(profile.memory??[]).map(m=>typeof m==='string'?{time:0,message:m}:{...m}),blocked:0,paid:false,paidAt:null,
       stateTime:0,timer:0,pending:null,reachLevel:2,travel:0,enteredAt:world.time};
     world.agents.push(a);world.spawned++;world.profileCounts[profileIndex]++;
     log(a,'입장 · '+profile.mission);event(a,'enter',{message:profile.mission});chooseDestination(a);
@@ -234,16 +300,31 @@ export function createWorld({mode='visits',limit=1000,population,duration=86400,
       const potential=world.potentialSchedule[potentialIndex++],hour=world.time/duration*24;
       bumpDay('considered');
       const open=world.time<duration-1e-8&&openingHours.some(([start,end])=>hour>=start&&hour<end);
-      let reason=!open?'closed':potential.entryDraw>=potential.needProbability?'not-needed':world.agents.length>=maxActive||world.agents.some(a=>distance(a.position,entryPoint(potential.id))<.65)?'crowded':null;
-      event(null,'potentialConsidered',{potentialId:potential.id,profileIndex:potential.profileIndex,scheduledTime:potential.time,entryDraw:potential.entryDraw,needProbability:potential.needProbability,entered:reason===null,reason:reason??'entered',source:'seeded-daily-assumption',message:'잠재 고객 방문 여부 판단'});
-      if(!reason&&!spawn(potential))reason='crowded';
-      if(reason){bumpDay('skipped');world.day.skippedReasons[reason]++;world.day.hourly[dayHour()].skippedReasons[reason]++;event(null,'entrySkipped',{potentialId:potential.id,profileIndex:potential.profileIndex,reason,message:reason==='closed'?'영업 외 시간 · 미입장':reason==='crowded'?'입구·매장 혼잡 · 미입장':'현재 구매 필요 없음 · 미입장'});}
+      const full=()=>world.agents.length>=maxActive||world.agents.some(a=>distance(a.position,entryPoint(potential.id))<.65);
+      const applyEntry=wants=>{
+        let reason=!open?'closed':!wants?'not-needed':full()?'crowded':null;
+        if(!reason&&!spawn(potential))reason='crowded';
+        event(null,'potentialConsidered',{potentialId:potential.id,personaSourceId:potential.personaSourceId,profileIndex:potential.profileIndex,scheduledTime:potential.time,entryDraw:potential.entryDraw,needProbability:potential.needProbability,entered:reason===null,reason:reason??'entered',source:decisionProvider?'jev-entry-choice':'seeded-daily-assumption',message:'잠재 고객 방문 여부 판단'});
+        if(reason){bumpDay('skipped');world.day.skippedReasons[reason]++;world.day.hourly[dayHour()].skippedReasons[reason]++;event(null,'entrySkipped',{potentialId:potential.id,profileIndex:potential.profileIndex,reason,message:reason==='closed'?'영업 외 시간 · 미입장':reason==='crowded'?'입구·매장 혼잡 · 미입장':'현재 구매 필요 없음 · 미입장'});}
+      };
+      if(decisionProvider&&open&&!full()){
+        requestDecision(null,{schemaVersion:'entry-context/1',runId,storeId,mapId,scenario,time:world.time,
+          persona:personaFor(potential,potential.profileIndex),memory:[],observer:{agentId:potential.id,profileIndex:potential.profileIndex,position:[...entryPoint(potential.id).slice(0,1),1.6,entryPoint(potential.id)[1]]},
+          constraints:{open,hasCapacity:true},allowedActions:[{type:'enter'},{type:'pass'}],day:{hour},activeEvents:world.activeEvents,
+          currentNeed:{needProbability:potential.needProbability,source:'authored-assumption-not-observed-intent'},
+          inventorySummary:PRODUCTS.map(p=>({id:p.id,category:p.category,price:p.price,available:world.stock[p.id]+world.backroomStock[p.id]}))},result=>applyEntry(result.action.type==='enter'));
+      }else applyEntry(potential.entryDraw<potential.needProbability);
     }
     world.nextArrival=world.potentialSchedule[potentialIndex]?.time??duration;
   }
   function decide(a) {
     a.pending=null;
-    const context=buildDecisionContext(world,a),result=decideLocally(context,seed),atPromo=a.station==='promo';
+    const context=buildDecisionContext(world,a);
+    if(decisionProvider){requestDecision(a,context,result=>applyShelfDecision(a,context,result));return;}
+    applyShelfDecision(a,context,decideLocally(context,seed));
+  }
+  function applyShelfDecision(a,context,result){
+    const atPromo=a.station==='promo';
     const decision=freezeRecord({context,result});a.lastDecision=decision;world.lastDecision=decision;
     // Every fact is observed at this actual fixture and retained in the full ledger.
     for(const observation of result.observations){
@@ -256,7 +337,7 @@ export function createWorld({mode='visits',limit=1000,population,duration=86400,
       if(!observation.noticed)continue;
       if(funnel)funnel.notice++;world.decisions++;
       event(a,'decision',{productId:p.id,locationId:fact.locationId,fixtureId:fact.fixtureId,level:fact.level,column:fact.column,position:[...fact.position],neighbors:fact.neighbors.map(n=>({...n})),distance:fact.distance,
-        stock:fact.stock,price:fact.price,isNew:fact.isNew,score:observation.score,contributions:{...observation.contributions},noticeProbability:observation.noticeProbability,purchaseProbability:observation.purchaseProbability,reason:observation.reason,picked:false,message:p.name+' 비교 · '+observation.reason});
+        stock:fact.stock,price:fact.price,isNew:fact.isNew,score:observation.score,contributions:{...observation.contributions},noticeProbability:observation.noticeProbability,noticeSource:observation.noticeSource??'seeded-local-attention',purchaseProbability:observation.purchaseProbability,probabilityMeaning:observation.probabilityMeaning??'authored-local-propensity-not-calibrated',reason:observation.reason,picked:false,message:p.name+' 비교 · '+observation.reason});
     }
     const selected=result.action.productId?context.observedProducts.find(p=>p.locationId===result.action.locationId):null;
     const product=selected?PRODUCT_MAP[selected.productId]:null;
@@ -367,7 +448,7 @@ export function createWorld({mode='visits',limit=1000,population,duration=86400,
     world.day.inStore=0;world.day.progress=1;world.isComplete=true;
     event(null,'dayEnded',{duration,potentialTotal:limit,considered:world.day.considered,entered:world.day.entered,skipped:world.day.skipped,buyers:world.buyers,paidUnits:world.paidUnits,amount:world.paidRevenue,closedWithoutPurchase:world.day.closedWithoutPurchase,message:'24시간 일일 관찰 종료 · 마감 이후 매출 없음'});
   }
-  world.isQuiescent=()=>mode==='day'&&!world.isComplete&&world.agents.length===0&&world.owner.state==='idle'&&!replenishmentCandidate();
+  world.isQuiescent=()=>mode==='day'&&!world.isComplete&&!world.hasPendingDecisions()&&world.agents.length===0&&world.owner.state==='idle'&&!replenishmentCandidate();
   world.nextBoundary=()=>{
     if(mode!=='day')return world.nextArrival;
     if(world.isComplete)return duration;
@@ -377,6 +458,8 @@ export function createWorld({mode='visits',limit=1000,population,duration=86400,
   };
   world.update=dt=>{
     if(!Number.isFinite(dt)||dt<0)throw new RangeError('dt must be a nonnegative finite number');
+    if(world.decisionError)throw new Error(world.decisionError);
+    if(world.hasPendingDecisions())return;
     if(world.isComplete||dt===0)return;
     if(mode==='day'){
       // Compensated elapsed-time accumulation avoids losing the final 50ms after
@@ -402,6 +485,7 @@ export function createWorld({mode='visits',limit=1000,population,duration=86400,
         for(const a of world.agents)advance(a,Math.min(.05,step));
         advanceOwner(Math.min(.05,step));
         world.agents=world.agents.filter(a=>a.state!=='done');world.day.inStore=world.agents.length;world.day.progress=world.time/duration;
+        if(world.hasPendingDecisions()){dayRequestedTime=world.time;dayTimeError=0;break;}
       }
       return;
     }
@@ -413,6 +497,7 @@ export function createWorld({mode='visits',limit=1000,population,duration=86400,
       if(world.spawned<limit&&world.agents.length<maxActive&&world.time>=world.nextArrival)spawn();
       for(const a of world.agents)advance(a,step);
       world.agents=world.agents.filter(a=>a.state!=='done');
+      if(world.hasPendingDecisions())break;
     }
     world.isComplete=world.completed>=limit;
   };
@@ -425,13 +510,13 @@ export function createWorld({mode='visits',limit=1000,population,duration=86400,
   world.snapshot=({detail=true}={})=>({mode,isComplete:world.isComplete,mapId,storeId,scenario,seed,runId,limit,maxActive,averageTravel:world.completed?world.totalTravel/world.completed:0,averageVisitTime:world.completed?world.totalVisitTime/world.completed:0,time:world.time,spawned:world.spawned,completed:world.completed,active:world.agents.length,
     paidRevenue:world.paidRevenue,paidGrossProfit:world.paidGrossProfit,paidUnits:world.paidUnits,buyers:world.buyers,decisions:world.decisions,purchaseDemand:world.purchaseDemand,stockoutDemand:world.stockoutDemand,missedDemand:world.stockoutDemand,
     shelfGapDemand:world.shelfGapDemand,totalStockoutDemand:world.totalStockoutDemand,replenishments:world.replenishments,replenishedUnits:world.replenishedUnits,
-    engine:JSON.parse(JSON.stringify(ENGINE)),ledgerCount:ledger.length,
+    engine:JSON.parse(JSON.stringify(world.engine)),personaSource:world.personaSource,modelCalls:world.modelCalls,decisionError:world.decisionError,decisionPending:world.hasPendingDecisions(),ledgerCount:ledger.length,
     day:world.day?JSON.parse(JSON.stringify(world.day)):null,owner:world.owner?JSON.parse(JSON.stringify(world.owner)):null,
     issues:world.eventSchedule.map(e=>({...JSON.parse(JSON.stringify(e)),phase:world.time+1e-8<e.start?'upcoming':world.time<e.end-1e-8?'active':'ended'})),
     initialStock:{...initialStock},initialTotalStock:{...world.initialTotalStock},stock:{...world.stock},backroomStock:{...world.backroomStock},shelfCapacity:{...world.shelfCapacity},paidUnitsBySKU:{...world.paidUnitsBySKU},returnedUnitsBySKU:{...world.returnedUnitsBySKU},inventory:inventorySnapshot(),costs:{...costs},profileCounts:[...world.profileCounts],profileWeights:[...weights],levels:world.levels.map(row=>({...row})),
     ...(detail?{lastDecision:world.lastDecision?JSON.parse(JSON.stringify(world.lastDecision)):null,analytics:analyticsSnapshot(),events:world.events.map(e=>JSON.parse(JSON.stringify(e))),replenishmentEvents:world.replenishmentEvents.map(e=>JSON.parse(JSON.stringify(e))),
       agents:world.agents.map(a=>({id:a.id,profileIndex:a.profileIndex,state:a.state,station:a.station,position:[...a.position],heading:a.heading,speed:a.speed,stateTime:a.stateTime,velocity:a.velocity,visited:[...a.visited],basket:a.basket.map(p=>p.id),spent:a.spent,paid:a.paid,paidAt:a.paidAt,blocked:a.blocked,travel:a.travel,enteredAt:a.enteredAt,pending:a.pending?.id??null,reachLevel:a.reachLevel,memory:a.memory.map(m=>({...m}))}))}:{})});
-  world.exportLedger=()=>JSON.parse(JSON.stringify({schemaVersion:'spatial-ledger/1',engine:ENGINE,provenance:{...PROVENANCE,events:mode==='day'?'authored-daily-assumption':PROVENANCE.events},
+  world.exportLedger=()=>JSON.parse(JSON.stringify({schemaVersion:'spatial-ledger/2',engine:world.engine,provenance:{...PROVENANCE,personas:world.personaSource,modelCall:decisionProvider?'typesafe-ai/jev-evaluation':'none',events:mode==='day'?'authored-daily-assumption':PROVENANCE.events},
     run:{mode,runId,storeId,mapId,scenario,seed,time:world.time,limit,isComplete:world.isComplete,spawned:world.spawned,completed:world.completed,initialStock,initialTotalStock:world.initialTotalStock,remainingStock:world.stock,backroomStock:world.backroomStock,shelfCapacity:world.shelfCapacity,paidUnitsBySKU:world.paidUnitsBySKU,returnedUnitsBySKU:world.returnedUnitsBySKU,inventory:inventorySnapshot(),eventSchedule:world.eventSchedule,openingHours,staffingAssumption:mode==='day'?'Separate cashier and replenishment worker; no supplier orders during the day':null},
     day:world.day,owner:world.owner,potentialSchedule:world.potentialSchedule,catalog:PRODUCTS,events:ledger,analytics:analyticsSnapshot(),lastDecision:world.lastDecision}));
   if(mode==='day'){world.nextArrival=world.potentialSchedule[0]?.time??duration;updateIssues();}

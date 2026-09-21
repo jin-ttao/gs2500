@@ -12,8 +12,11 @@ const modules = [
   'app.js', 'card-worlds.js', 'characters.js', 'lab.js', 'maps.js',
   'model.js', 'navigation.js', 'store.js', 'world.js', 'styles.css',
   'context.js', 'merchandising.js', 'day.js', 'simulation-cards.css', 'store-pages.css',
+  'summary-replay.js', 'replay-recorder.js', 'replay-worker.js',
+  'personas.js', 'behavior.js', 'jev.js',
 ];
 await Promise.all(modules.map(name => cp(join(root, name), join(output, name))));
+await cp(join(root,'data'),join(output,'data'),{recursive:true});
 await mkdir(join(output, 'components', 'ui'), { recursive: true });
 await cp(join(root, 'components', 'ui', 'simulation-card.js'), join(output, 'components', 'ui', 'simulation-card.js'));
 await cp(join(root, 'components', 'ui', 'store-pager.js'), join(output, 'components', 'ui', 'store-pager.js'));

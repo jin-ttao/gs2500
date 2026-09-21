@@ -10,7 +10,15 @@ export function getFixturePlacements(fixture,scenario='hq') {
   if(!['promo','gondola','fridge','coffee'].includes(fixture.type))return [];
   const category=fixtureCategory[fixture.station]??fixtureCategory[fixture.id];
   const catalog=PRODUCTS.filter(p=>p.category===(fixture.type==='fridge'?'drink':category));
-  const rows=fixture.type==='promo'?layout.levels:fixture.type==='coffee'?[['coffee']]:Array.from({length:fixture.type==='fridge'?4:3},()=>catalog.length?catalog.map(p=>p.id):PRODUCTS.filter(p=>p.category==='snack').map(p=>p.id));
+  // Project each candidate's SKU priorities into every relevant fixture, not only
+  // the promotional island. Package bases/fixture geometry are unchanged, and
+  // renderers consume this same placement list as the decision engine.
+  const priority=[...layout.levels[2],...layout.levels[1],...layout.levels[0],...layout.levels[3]];
+  const fixtureIds=(catalog.length?catalog:PRODUCTS.filter(p=>p.category==='snack'))
+    .map(p=>p.id).sort((a,b)=>priority.indexOf(a)-priority.indexOf(b)||a.localeCompare(b));
+  const centerOrder=Array.from({length:fixtureIds.length},(_,i)=>i).sort((a,b)=>Math.abs(a-(fixtureIds.length-1)/2)-Math.abs(b-(fixtureIds.length-1)/2)||a-b);
+  const ordered=Array(fixtureIds.length);fixtureIds.forEach((id,index)=>{ordered[centerOrder[index]]=id;});
+  const rows=fixture.type==='promo'?layout.levels:fixture.type==='coffee'?[['coffee']]:Array.from({length:fixture.type==='fridge'?4:3},(_,row)=>ordered.map((_,column)=>ordered[(column+row)%ordered.length]));
   const sides=fixture.type==='gondola'?[-1,1]:[1],placements=[];
   for(const side of sides)rows.forEach((ids,row)=>ids.forEach((productId,column)=>{
     if(!PRODUCT_MAP[productId])throw new RangeError('Unknown product: '+productId);
@@ -20,7 +28,7 @@ export function getFixturePlacements(fixture,scenario='hq') {
     const z=fixture.type==='promo'?.22:fixture.type==='fridge'?.65:fixture.type==='coffee'?.38:side*.34;
     const [worldX,worldZ]=localToWorld(fixture,[x,z]);
     const id=`${fixture.id}:${side}:${row+1}:${column+1}`;
-    placements.push({id,locationId:id,productId,fixtureId:fixture.id,station:fixture.station??null,level:row+1,column:column+1,facings:1,side,local:[x,y,z],position:[worldX,y,worldZ],neighbors:[]});
+    placements.push({id,locationId:id,productId,fixtureId:fixture.id,station:fixture.station??null,level:row+1,column:column+1,facings:1,side,local:[x,y,z],position:[worldX,y,worldZ],neighbors:[],merchandisingSource:fixture.type==='promo'?'candidate-promo-plan':'candidate-plan-projection'});
   }));
   for(const item of placements){
     for(const [relation,level,column] of [['left',item.level,item.column-1],['right',item.level,item.column+1],['above',item.level+1,item.column],['below',item.level-1,item.column]]){

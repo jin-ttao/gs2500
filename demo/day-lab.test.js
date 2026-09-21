@@ -6,10 +6,10 @@ import {SCENARIOS} from './model.js';
 const unlimited={budgetMs:Infinity};
 const normalized=lab=>JSON.parse(JSON.stringify(lab.runs.map(run=>run.world.snapshot()),(key,value)=>key==='runId'?undefined:value));
 
-test('the default experiment has nine stores, four alternatives and a slow shared 24-hour clock',()=>{
+test('the default experiment has nine stores, four alternatives and a shared 32x 24-hour clock',()=>{
   const lab=createLab();
   assert.equal(lab.mode,'day');assert.equal(lab.duration,86400);assert.equal(lab.limit,1000);
-  assert.equal(lab.speed,4);assert.ok(SPEEDS.includes(1800));
+  assert.equal(lab.speed,32);assert.ok(SPEEDS.includes(1800));
   assert.equal(lab.storeGroup,'all');assert.equal(lab.stores.length,9);
   assert.equal(STORE_CATALOG.length,9);assert.equal(new Set(STORE_CATALOG.map(store=>store.id)).size,9);
   assert.equal(lab.runs.length,36);assert.equal(new Set(lab.runs.map(run=>run.world)).size,36);
@@ -20,6 +20,9 @@ test('the default experiment has nine stores, four alternatives and a slow share
     assert.equal(run.world.day.considered,0);
     assert.equal(run.world.isComplete,false);
   }
+  lab.start();lab.advance(.5,unlimited);
+  assert.equal(lab.time,16);
+  assert.ok(lab.runs.every(run=>Math.abs(run.world.time-16)<1e-7));
 });
 
 test('all four alternatives use the same potential cohort in each of the nine stores',()=>{

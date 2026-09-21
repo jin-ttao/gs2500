@@ -7,10 +7,10 @@
     "node": ">=22"
   },
   "scripts": {
-    "start": "python3 -m http.server 4173 --bind 127.0.0.1",
+    "start": "node server.mjs",
     "build": "node scripts/build.mjs",
     "preview": "python3 -m http.server 4174 --bind 127.0.0.1 --directory dist",
-    "test": "node --test model.test.js world.test.js maps.test.js world-sync.test.js lab.test.js card-sync.test.js day.test.js day-lab.test.js renderer-owner.test.js simulation-card.test.js store-pager.test.js",
+    "test": "node --test *.test.js",
     "test:day": "node scripts/verify-day.mjs"
   },
   "dependencies": {
