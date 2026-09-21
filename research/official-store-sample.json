@@ -1,0 +1,20 @@
+{
+  "schemaVersion": "gs2500-research/1",
+  "observedAt": "2026-09-21",
+  "source": "https://www.gsretail.com/brand/gs25",
+  "method": "Official site > 매장 찾기 > 삼성역 search; manually observed public UI",
+  "coverage": "one-store verification sample, not a nationwide inventory",
+  "stores": [
+    {
+      "name": "GS25삼성역점",
+      "displayAddress": "서울 강남구 영동대로510, 1층(삼성1동 168)",
+      "servicesObserved": ["상비의약품", "현금출금", "군고구마", "반값택배픽업", "붕어빵", "마감할인"],
+      "hours": null,
+      "floorPlan": null,
+      "floorArea": null,
+      "pos": null,
+      "note": "Website listing observed; on-site operation, completeness of service tags, physical layout and sales not verified. Do not merge with synthetic demo store by name alone."
+    }
+  ],
+  "availableServiceFiltersObserved": ["토토", "셀프25", "상비의약품", "국내택배접수", "카페25", "치킨25", "현금 입/출금", "세금환급", "현금출금", "군고구마", "반값택배접수", "셀프조리기", "스마트ATM", "와인25플러스", "심장제세동기", "반값택배픽업", "붕어빵", "마감할인", "신선강화", "고피자", "양주/와인특화", "무신사", "대한항공POSA", "생과일스무디"]
+}

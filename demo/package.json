@@ -1,0 +1,19 @@
+{
+  "name": "gs-spatial-lab-demo",
+  "private": true,
+  "version": "0.1.0",
+  "type": "module",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "start": "node server.mjs",
+    "build": "node scripts/build.mjs",
+    "preview": "python3 -m http.server 4174 --bind 127.0.0.1 --directory dist",
+    "test": "node --test *.test.js",
+    "test:day": "node scripts/verify-day.mjs"
+  },
+  "dependencies": {
+    "three": "0.180.0"
+  }
+}
