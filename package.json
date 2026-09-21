@@ -1,0 +1,12 @@
+{
+  "name": "gs2500-workflow",
+  "private": true,
+  "type": "module",
+  "engines": { "node": ">=22" },
+  "scripts": {
+    "build": "npm --prefix demo run build && node scripts/build-workspace.mjs",
+    "test": "node --test workspace/*.test.js && npm --prefix demo test",
+    "start": "node scripts/serve-workspace.mjs",
+    "check": "node --check workspace/app.js && node --check workspace/world-view.js"
+  }
+}
