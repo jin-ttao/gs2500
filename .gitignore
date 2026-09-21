@@ -2,4 +2,21 @@
 .env*
 !.env.example
 node_modules/
+dist/
+artifacts/
+.DS_Store
+__pycache__/
+*.pyc
+*.log
+*.blend
+*.blend1
+
+# Preserve research/planning notes locally; publish the reviewed runnable demo.
 /제품방향-입력.md
+/PRODUCT_SPEC.md
+/UX_SPEC.md
+/REFERENCES.md
+/SMALLVILLE_ARCHITECTURE.md
+/SMALLVILLE_FUNCTION_INVENTORY.md
+/SMALLVILLE_TO_GS.md
+/NEMOTRON_1000_EXPERIMENT.md

@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="ko">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <meta name="theme-color" content="#101719">
+  <title>GS2500 — 매장 배치 실험실</title>
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 40 40'%3E%3Crect width='40' height='40' rx='11' fill='%237be3cf'/%3E%3Cpath d='M28 12H13v16h15v-9h-9v4h5v1h-7v-8h11z' fill='%23101719'/%3E%3C/svg%3E">
+  <link rel="stylesheet" href="./styles.css">
+  <script type="importmap">{"imports":{"three":"./node_modules/three/build/three.module.js","three/addons/":"./node_modules/three/examples/jsm/"}}</script>
+</head>
+<body>
+  <div class="app-shell">
+    <header class="topbar">
+      <a class="brand" href="./" aria-label="GS2500 매장 실험실"><span class="brand-symbol">G</span><span>GS<span class="brand-number">2500</span></span><span class="brand-caption">RETAIL DECISION LAB</span></a>
+      <div class="project-label"><span class="signal-dot"></span> 매장 배치 실험실 <span class="project-version">/ LOCAL DEMO</span></div>
+      <div class="view-switch" role="group" aria-label="데모 화면 전환"><button id="managerView" class="active" aria-pressed="true">관리자</button><button id="ownerView" aria-pressed="false">점주 보기 <span>↗</span></button></div>
+    </header>
+    <section class="experiment-bar" aria-label="전체 실험 제어">
+      <div class="experiment-title"><div class="eyebrow">NINE LIVE WORLDS. ONE SHARED CLOCK.</div><h1>세 매장, 아홉 가지 가능성.</h1><p>동일 엔진 · 3D/집계/배속 동기화 <span>합성 데이터 · 실제 매출 예측 아님</span></p></div>
+      <div class="experiment-controls">
+        <div class="speed-control"><span>전체 배속</span><div id="speedOptions" role="group" aria-label="전체 시뮬레이션 배속"><button data-speed="1">1×</button><button data-speed="4">4×</button><button data-speed="16">16×</button><button data-speed="32" class="active" aria-pressed="true">32×</button><button data-speed="64">64×</button><button data-speed="128">128×</button></div></div>
+        <div class="run-controls"><button id="resetRuns" class="icon-button" aria-label="아홉 실험 초기화" title="아홉 실험 초기화">↺</button><button id="pauseButton" class="secondary-button" disabled>Ⅱ 일시 정지</button><button id="runButton" class="primary-button"><span>▶</span> 9개 실험 시작</button></div>
+      </div>
+    </section>
+    <main id="managerPanel" class="workbench">
+      <section class="comparison-board" aria-labelledby="boardTitle">
+        <div class="panel-heading"><div><span class="section-index">01</span><h2 id="boardTitle">9개 3D 매장 동시 관찰</h2><span class="count-chip">3 매장 × 3 후보</span></div><span id="boardStatus" class="status-label">시작 대기</span></div>
+        <div class="board-guide"><span>매장 안에서 같은 고객 · 초기 재고 · 시드로 비교</span><span>카드 선택 → 확대 관찰</span></div>
+        <div id="mobileStoreTabs" class="mobile-store-tabs" role="tablist" aria-label="비교할 매장"></div>
+        <div id="comparisonRows" class="comparison-rows"></div>
+        <div class="board-footnote"><span><i class="signal-dot"></i> 아홉 공간을 실제로 동시에 실행합니다.</span><span>매출총이익 = 결제매출 − 합성 상품 원가</span></div>
+        <div class="lab-progress"><div class="progress-meta"><span id="totalProgress">0 / 9,000 방문 완료</span><span id="completedRuns">완료 0 / 9</span></div><div class="progress-track"><i id="totalProgressFill"></i></div></div>
+      </section>
+      <div id="inspectorBackdrop" class="inspector-backdrop" aria-hidden="true" hidden></div>
+      <section id="selectedPanel" class="selected-panel" role="dialog" aria-modal="true" aria-labelledby="selectedTitle" tabindex="-1" hidden>
+        <div class="panel-heading selected-heading"><div><span class="section-index">02</span><h2>선택 후보 확대 관찰</h2></div><div class="inspector-heading-actions"><span class="scene-live-tag" id="sceneStatus">READY</span><button id="closeInspector" class="close-inspector" aria-label="확대 관찰 닫기" title="닫기 · Esc">×</button></div></div>
+        <div class="selection-title"><div><span id="selectedStore">삼성역점</span><h3 id="selectedTitle">A · 본사 표준안</h3></div><div class="selection-clock"><span>시뮬레이션 경과</span><strong id="clock">00:00:00</strong></div></div>
+        <div class="viewport" aria-label="선택한 후보의 실시간 3D 매장">
+          <div id="webgl"></div>
+          <div class="scene-map-tag"><span class="signal-dot"></span><span id="mapTitle">합성 오피스형</span><span id="liveCount">입장 대기</span></div>
+          <div id="shelfLabel" class="world-label"><span class="label-dot"></span><div><b>행사 매대 A</b><small id="levelLabel">3층 선택</small></div></div>
+          <div id="agentLabel" class="agent-label" hidden><b id="sceneAgentName"></b><span id="sceneAgentState"></span></div>
+          <div class="camera-toolbar"><button id="resetView" aria-label="전체 매장 보기" title="전체 매장 보기">⌂</button><button id="focusShelf" aria-label="행사 매대 확대" title="행사 매대 확대">▥</button><i></i><button id="zoomIn" aria-label="확대">＋</button><button id="zoomOut" aria-label="축소">−</button><i></i><button id="togglePaths" aria-pressed="true" aria-label="고객 동선 표시" title="고객 동선 표시">⌁</button></div>
+          <div class="view-help">드래그로 회전 · 고객을 눌러 관찰</div>
+          <div class="loading" id="loading" role="status"><span class="spinner"></span><b>아홉 개의 실험 공간을 준비합니다.</b><small>선택한 공간을 3D로 연결하고 있습니다.</small></div>
+        </div>
+        <div class="selected-metrics"><div><span>누적 결제매출</span><strong id="selectedRevenue">₩0</strong></div><div><span>누적 매출총이익</span><strong id="selectedProfit">₩0</strong></div><div><span>품절 구매 실패</span><strong id="selectedStockout">0건</strong></div></div>
+        <div class="detail-tabs" role="tablist" aria-label="선택 후보 상세"><button data-detail="shelf" role="tab" aria-selected="true" class="active">진열 · 재고</button><button data-detail="agent" role="tab" aria-selected="false">고객 관찰</button><button data-detail="log" role="tab" aria-selected="false">판단 기록 <span id="decisionCount">0</span></button></div>
+        <div class="detail-content">
+          <section id="detailShelf" class="detail-pane" role="tabpanel" aria-label="진열과 재고"><p id="candidateReason" class="candidate-reason"></p><div id="shelfEditor" class="shelf-editor"></div><div class="stock-warning" id="stockWarning">모든 상품의 재고가 준비되어 있습니다.</div></section>
+          <section id="detailAgent" class="detail-pane" role="tabpanel" aria-label="고객 관찰" hidden><div class="persona-row"><div class="persona-avatar" id="personaAvatar">·</div><div><b id="personaName">고객 입장 대기</b><span id="personaMeta">실험을 시작하면 고객을 관찰할 수 있습니다.</span></div><span id="personaIndex"></span></div><div class="agent-goal"><span id="agentState">대기</span><b id="agentTarget">—</b></div><div class="agent-basket"><span id="agentBasket">아직 담은 상품 없음</span><small id="agentBudget"></small></div><ol id="agentMemory" class="agent-memory"></ol><div class="agent-actions"><button id="focusAgent">고객 확대 ↗</button><button id="nextAgent">다음 고객 →</button></div></section>
+          <section id="detailLog" class="detail-pane" role="tabpanel" aria-label="실시간 판단 기록" hidden><div class="log-heading"><span>이 공간에서 발생한 실제 이벤트</span><span id="selectedDistance">평균 이동 —</span></div><div id="trace"></div><p class="detail-note">품절 구매 실패는 원하는 상품의 재고가 없어 실패한 구매 시도 건수입니다.</p></section>
+        </div>
+        <div class="approval-bar"><div><b id="approvalState">선택과 승인은 별개입니다</b><span id="approvalHint">실험 완료 후 이 기기에 계획을 저장합니다.</span></div><button id="approveButton" class="secondary-button" disabled>계획 승인 ↗</button></div>
+      </section>
+    </main>
+    <main id="ownerPanel" class="owner-panel" hidden><div class="owner-intro"><span class="eyebrow">STORE OWNER · LOCAL PREVIEW</span><h2>승인된 우리 매장 계획</h2><p>이 기기에 저장된 승인 스냅샷만 표시합니다. 실제 계정·발주 시스템과 연결되지 않습니다.</p></div><label class="owner-store-label" for="ownerStoreSelect">매장 선택 <select id="ownerStoreSelect"></select></label><div id="ownerPlan"></div></main>
+    <footer class="statusbar"><div><span class="signal-dot" id="engineDot"></span><span id="engineStatus">엔진 준비 · 전체 일시 정지</span><span class="footer-divider"></span><span id="effectiveSpeed">설정 32× · 실제 0.0×</span></div><span class="footer-disclaimer">로컬 합성 데모 · GS / JEV / Nemotron 미연결</span></footer>
+  </div>
+  <output id="syncProbe" hidden></output>
+  <div id="toast" class="toast" role="status" hidden></div>
+  <script type="module">
+    import('./app.js').catch(error => {
+      const el = document.getElementById('loading');
+      el.replaceChildren();
+      const title = document.createElement('b'); title.textContent = '실험실을 열지 못했습니다.';
+      const hint = document.createElement('small'); hint.textContent = 'npm start로 실행하고 WebGL을 지원하는 브라우저에서 열어주세요.';
+      el.append(title, hint);
+      document.getElementById('runButton').disabled = true;
+      document.getElementById('boardStatus').textContent = '3D 실험실 로딩 오류';
+      const toast = document.getElementById('toast');
+      toast.textContent = '3D 실험실을 열지 못했습니다. npm start로 실행하고 WebGL 지원 브라우저에서 새로고침해주세요.';
+      toast.hidden = false;
+      console.error(error);
+    });
+  </script>
+</body>
+</html>
