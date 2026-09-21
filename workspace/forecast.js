@@ -4,10 +4,10 @@ import { deriveBehavior, productPolicy } from '../demo/behavior.js';
 import { getBay, getStore, getInventory, getPlacements } from './data.js';
 
 export const FORECAST_ENGINE = Object.freeze({
-  id: 'local-analytic-30day-v1', type: 'local-analytic', version: 1,
+  id: 'local-analytic-30day-v2', type: 'local-analytic', version: 2,
   label: '로컬 30일 수요·재고 계산', synthetic: true, jevCalled: false,
   personaSource: 'authored-five-category-preference-profiles',
-  relationTo3D: 'SKU·초기 재고·진열 좌표를 공유하지만, 3D의 하루 행동 엔진과는 다른 분석 모델입니다.',
+  relationTo3D: '3D는 이 30일 계산에서 기록한 방문·상품 판단을 재생합니다. 별도 구매 판단이나 매출 계산을 실행하지 않습니다.',
 });
 export const COST_RATIOS = Object.freeze({ meal: .71, drink: .64, snack: .62, health: .68 });
 export const FORECAST_ASSUMPTIONS = Object.freeze([
@@ -19,13 +19,15 @@ export const FORECAST_ASSUMPTIONS = Object.freeze([
   '2일차부터 매일 06시에 초기 총재고의 26%(내림)를 SKU별로 받는 고정 합성 납품 계획입니다. 실제 발주를 실행하거나 자동 추천하지 않습니다.',
   '합성 방문에서 선택·예산·재고 검사를 통과한 상품만 당일 결제 처리합니다. 결품률은 미충족 구매 수량 / 구매 시도 수량입니다.',
   '매출총이익은 결제액에서 합성 상품 원가만 뺀 값입니다. 인건비·임대료·폐기·유통기한·세금은 반영하지 않습니다.',
-  '이 분석은 동선·혼잡·직원 이동 시간·재방문 기억을 재현하지 않습니다. 3D는 별도의 24시간 행동 관찰 화면입니다.',
+  '3D는 같은 30일 계산에서 시간당 최대 1명씩 뽑은 실제 계산 방문·상품 판단의 발췌 재생입니다. 이동·체류 시간은 시각화용 보간이며 동선·혼잡·직원 이동 시간·재방문 기억의 예측이 아닙니다.',
   '대상 24개 SKU와 행사 매대 위치를 계산합니다. 점포의 모든 상품을 포함한 전체 매출이 아니며, 다른 매대 위치 효과는 30일 공식에 넣지 않습니다.',
 ]);
 
 const clamp = (n, low, high) => Math.max(low, Math.min(high, n));
 const zeroSKU = () => Object.fromEntries(PRODUCTS.map(product => [product.id, 0]));
 const sum = object => Object.values(object).reduce((a,b) => a+b, 0);
+const LEDGER_METRICS = Object.freeze(['revenue','profit','paidUnits','payments','entered','purchaseDemand','stockoutDemand','shelfGapDemand','totalStockoutDemand','replenishedUnits','receivedUnits']);
+const zeroMetrics = () => Object.fromEntries(LEDGER_METRICS.map(key => [key,0]));
 const fingerprint = value => {
   let hash = 2166136261;
   for (const char of JSON.stringify(value)) hash = Math.imul(hash ^ char.charCodeAt(0), 16777619) >>> 0;
@@ -126,7 +128,7 @@ function placementScores(config, scenario) {
     const horizontalNeighbors = item.neighbors.filter(n => n.relation === 'left' || n.relation === 'right');
     const adjacency = horizontalNeighbors.some(n => complements(product.category, PRODUCT_MAP[n.productId].category)) ? .055 : 0;
     const center = 1 - Math.abs(item.column - 3.5) / 2.5;
-    return [item.productId, { visibility: clamp(levels[item.level - 1] + center * .06 + adjacency, .05, .95), level: item.level, column: item.column, position: [...item.position], locationId: item.locationId, neighbors: item.neighbors.map(n => ({ ...n })) }];
+    return [item.productId, { fixtureId: item.fixtureId, visibility: clamp(levels[item.level - 1] + center * .06 + adjacency, .05, .95), level: item.level, column: item.column, position: [...item.position], locationId: item.locationId, neighbors: item.neighbors.map(n => ({ ...n })) }];
   }));
 }
 
@@ -134,30 +136,42 @@ function runScenario(config, cohort, scenario, candidateId, name) {
   const shelf = { ...config.inventory.shelf }, backroom = { ...config.inventory.backroom };
   const capacity = config.inventory.capacity, positions = placementScores(config, scenario);
   const costs = Object.fromEntries(PRODUCTS.map(p => [p.id, Math.round(p.price * COST_RATIOS[p.category] / 10) * 10]));
-  const totals = { revenue: 0, profit: 0, paidUnits: 0, payments: 0, entered: 0, purchaseDemand: 0, stockoutDemand: 0, shelfGapDemand: 0, totalStockoutDemand: 0, replenishedUnits: 0, receivedUnits: 0 };
+  const totals = zeroMetrics();
   const paidUnitsBySKU = zeroSKU(), receivedBySKU = zeroSKU(), stockoutBySKU = zeroSKU();
   const daily = [];
+  const timeline = [], visits = [], cumulative = { potential: 0, ...zeroMetrics() };
   for (const { day, people, events } of cohort) {
     const row = { day, potential: config.populationPerDay, uniquePersonaCount:config.selected?config.selected.length:5, cohortKey: `${config.cohortKey}:${day}`, ...Object.fromEntries(Object.keys(totals).map(key => [key,0])), paidUnitsBySKU: zeroSKU(), receivedBySKU: zeroSKU(), stockoutBySKU: zeroSKU(), openingInventory: Object.fromEntries(PRODUCTS.map(p => [p.id,shelf[p.id]+backroom[p.id]])), eventIds: events.map(e => e.id), events };
     for (let hour = 0; hour < 24; hour++) {
+      const hourPeople = people.filter(person => person.hour === hour);
+      const entrants = hourPeople.filter(person => person.entered);
+      // Sample by the shared cohort, never by purchase outcome or candidate.
+      const sampledPersonId = entrants[0]?.id;
+      const before = Object.fromEntries(LEDGER_METRICS.map(key => [key,row[key]]));
+      const hourlyPaidBySKU = zeroSKU(), hourlyStockoutBySKU = zeroSKU(), transfers = [];
       if (day > 1 && hour === 6) for (const product of PRODUCTS) {
         const qty = config.delivery[product.id]; backroom[product.id] += qty;
         row.receivedUnits += qty; row.receivedBySKU[product.id] += qty; receivedBySKU[product.id] += qty;
+        if (qty) transfers.push({ type:'delivery', productId:product.id, quantity:qty });
       }
       if (config.replenishmentEnabled) for (const product of PRODUCTS) {
         const id = product.id;
         if (shelf[id] > capacity[id] * .35) continue;
         const qty = Math.min(capacity[id] - shelf[id], backroom[id]);
         shelf[id] += qty; backroom[id] -= qty; row.replenishedUnits += qty;
+        if (qty) transfers.push({ type:'replenishment', productId:id, quantity:qty });
       }
-      for (const person of people.filter(p => p.hour === hour && p.entered)) {
+      for (const person of entrants) {
         row.entered++;
         const {profile,behavior,policies} = person.compiled;
+        const sampled = person.id === sampledPersonId;
+        const visibleProductIds = sampled ? [] : null, decisions = sampled ? [] : null;
         const desired = PRODUCTS.map((product,index) => {
           const position = positions[product.id];
           const eventFactor = person.activeEvents.reduce((n,e) => n * (e.productMultipliers?.[product.id] ?? 1) * (e.categoryMultipliers?.[product.category] ?? 1), 1);
           const intent = evaluateForecastIntent(profile,product,{behavior,policy:policies[product.id],eventFactor});
           const visible = person.random(14100 + index) < position.visibility;
+          if (sampled && visible) visibleProductIds.push(product.id);
           const wants = person.random(14200 + index) < intent.probability;
           return { product, index, eventFactor, wants: visible && wants && intent.allowed, priority: intent.priority + person.random(14300 + index) * .55 };
         }).filter(item => item.wants).sort((a,b) => b.priority-a.priority || a.product.id.localeCompare(b.product.id));
@@ -169,18 +183,44 @@ function runScenario(config, cohort, scenario, candidateId, name) {
           if(!intent.allowed||person.random(14200+index)>=intent.probability)continue;
           attempts++; row.purchaseDemand++;
           const id = product.id;
+          const recordedDecision = sampled ? { productId:id, price:product.price, quantity:1,
+            fixtureId:positions[id].fixtureId, locationId:positions[id].locationId,
+            position:[...positions[id].position], level:positions[id].level, column:positions[id].column,
+            missionFit:intent.missionFit, pricePenalty:intent.pricePenalty,
+          } : null;
           if (shelf[id] <= 0) {
             row.stockoutDemand++; row.stockoutBySKU[id]++; stockoutBySKU[id]++;
+            hourlyStockoutBySKU[id]++;
             if (backroom[id] > 0) row.shelfGapDemand++; else row.totalStockoutDemand++;
+            if (sampled) decisions.push({ ...recordedDecision, outcome:'shelf-empty', backroomAvailable:backroom[id]>0, paidAmount:0 });
             continue;
           }
           shelf[id]--; spent += product.price; paidUnits++; basket.push(id);
           row.paidUnitsBySKU[id]++; paidUnitsBySKU[id]++;
+          hourlyPaidBySKU[id]++;
           row.revenue += product.price; row.profit += product.price - costs[id];
+          if (sampled) decisions.push({ ...recordedDecision, outcome:'purchased', paidAmount:product.price });
         }
         if (paidUnits) row.payments++;
         row.paidUnits += paidUnits;
+        if (sampled) visits.push({ id:person.id, day, hour, sourceId:person.sourceId,
+          profileIndex:person.profileIndex, name:profile.name??'합성 방문자',
+          // The model resolves time to an hour. The center is only a display anchor.
+          second:(day-1)*86400+hour*3600+1800, budget:person.budget,
+          paidAmount:spent, paidUnits, visibleProductIds, decisions,
+          eventIds:person.activeEvents.map(event=>event.id),
+        });
       }
+      const hourTotals = Object.fromEntries(LEDGER_METRICS.map(key => [key,row[key]-before[key]]));
+      cumulative.potential += hourPeople.length;
+      for (const key of LEDGER_METRICS) cumulative[key] += hourTotals[key];
+      timeline.push({ day, hour, startSecond:(day-1)*86400+hour*3600, endSecond:(day-1)*86400+(hour+1)*3600,
+        potential:hourPeople.length, skipped:hourPeople.length-entrants.length, ...hourTotals,
+        paidUnitsBySKU:hourlyPaidBySKU, stockoutBySKU:hourlyStockoutBySKU,
+        cumulative:{...cumulative}, transfers, shelfStock:{...shelf}, backroomStock:{...backroom},
+        eventIds:events.filter(event=>hour>=event.startHour&&hour<event.endHour).map(event=>event.id),
+        sampleVisitId:sampledPersonId??null,
+      });
     }
     row.skipped = row.potential-row.entered;
     row.closingInventory = Object.fromEntries(PRODUCTS.map(p => [p.id,shelf[p.id]+backroom[p.id]]));
@@ -196,6 +236,11 @@ function runScenario(config, cohort, scenario, candidateId, name) {
     initialInventory: structuredClone(config.inventory), finalShelf: shelf, finalBackroom: backroom,
     finalInventory: Object.fromEntries(PRODUCTS.map(p => [p.id,shelf[p.id]+backroom[p.id]])), warnings,
     inputFingerprint: config.inputFingerprint, engine: FORECAST_ENGINE.id, personaSource:config.personaSource.dataset,
+    replay:{version:1,source:'same-forecast-ledger',days:config.days,binSeconds:3600,
+      cohortKey:config.cohortKey,representation:'one-recorded-entrant-per-hour',
+      timing:'hour-resolved; center-second is a display anchor, travel is interpolation',
+      accounting:'all visits in hourly bins; detailed sample visits are not the accounting total',
+      synthetic:true,jevCalled:false,timeline,visits},
   };
 }
 

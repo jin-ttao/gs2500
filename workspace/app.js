@@ -43,9 +43,9 @@ function render(){
     progressLabel:elapsed&&!busy?`계산 ${(elapsed/1000).toFixed(2)}초 · 동일 시드·초기 재고·잠재 수요`:undefined});
   const host=app.querySelector(route==='board'?'#world-board':route==='candidate'?'#world-detail':'[data-no-world]');
   if(host&&!approvalOpen){
-    host.setAttribute('aria-label','기존 3D 엔진 연결 영역');
-    host.innerHTML='<p class="world-disclosure">3D 공간을 연결하고 있습니다. 30일 계산은 별도 수요 모형입니다.</p>';
-    const options={bays:route==='candidate'?[bay]:BAYS,stores:STORES,results,selection:candidate.id,detail:route==='candidate',signal:controller.signal};
+    host.setAttribute('aria-label','같은 계산 기록의 3D 재생 영역');
+    host.innerHTML='<p class="world-disclosure">점포와 진열안에 맞는 계산 기록을 연결하고 있습니다.</p>';
+    const options={bays:route==='candidate'?[bay]:BAYS,stores:STORES,results,selection:candidate.id,selectedStoreId,detail:route==='candidate',busy,signal:controller.signal};
     import('./world-view.js').then(({mountWorlds})=>ownGeneration===generation?mountWorlds(host,options):()=>{}).then(dispose=>{if(ownGeneration===generation)cleanup=dispose;else dispose?.();}).catch(()=>{
       if(ownGeneration===generation)host.innerHTML='<div class="world-error" role="alert">3D 연결 실패. WebGL·파일 연결을 확인하고 이 화면을 다시 열어주세요. 계산 결과와 승인 상태는 유지됩니다. <a href="./demo/">원본 3D 실험실 열기</a></div>';
     });

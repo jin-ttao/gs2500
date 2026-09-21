@@ -1,6 +1,6 @@
 # GS2500 공통 데이터·계산 계약
 
-이 디렉터리는 매니저·점주 흐름을 기존 `demo/` 3D에 연결합니다. 기존 엔진 내부는 바꾸지 않습니다. 판매·점포명·재고·이벤트·회고는 합성 데모이며 실제 GS25 데이터가 아닙니다.
+이 디렉터리는 매니저·점주 흐름과 3D 재생을 같은 30일 구매·재고 계산 기록에 연결합니다. 기존 `demo/`의 공간·상품·렌더러를 재사용하되, 통합 화면에서는 기존 하루 구매 판단 엔진을 별도로 실행하지 않습니다. 판매·점포명·재고·이벤트·회고는 합성 데모이며 실제 GS25 데이터가 아닙니다.
 
 ## 식별자
 
@@ -13,7 +13,7 @@
 
 현재안은 `hq`/`candidateId: current`입니다. 후보 A=`owner`, B=`balanced`, C=`discovery`입니다. 기존 3D 전광판의 A–D 문자와 의미가 다를 수 있으므로 연결은 문자가 아닌 **scenario key**를 사용합니다. 상세 화면에 후보명과 scenario를 함께 표시합니다.
 
-`data.js`의 `getWorldConfig({storeId,bayId,candidateId})`를 기존 `createWorld`에 전달합니다. 이름은 위 표의 합성 표시 이름, 내부 계산은 기존 ID입니다. 24개 상품은 `demo/model.js`의 PRODUCTS를 그대로 가져옵니다. 재고는 기존 점포의 stockScale 및 `splitDayInventory`, 좌표와 이웃은 `getFixturePlacements`를 그대로 사용합니다. 복제 상품·별도 정적 선반을 만들지 않습니다.
+`data.js`의 점포·후보 계약을 수치 계산과 3D에 함께 사용합니다. 이름은 위 표의 합성 표시 이름, 내부 연결은 기존 ID입니다. 24개 상품은 `demo/model.js`의 PRODUCTS를 그대로 가져옵니다. 재고는 기존 점포의 stockScale 및 `splitDayInventory`, 좌표와 이웃은 `getFixturePlacements`를 그대로 사용합니다. 복제 상품·별도 정적 선반을 만들지 않습니다. `getWorldConfig`는 원본 하루 엔진의 호환 입력으로 남지만, 통합 재생에서 `createWorld`를 실행하기 위한 경로가 아닙니다.
 
 ## 데이터 API
 
@@ -22,7 +22,7 @@
 - `getInventory(storeId)`: 새로운 `{total,shelf,backroom,capacity}` SKU별 정수 맵. `total=shelf+backroom`.
 - `getPlacements(storeId,scenario)`: 모든 실제 3D fixture의 위치. 매대 화면은 `fixtureId==='promo'`로 필터합니다.
 - `getShelfRows(storeId,scenario)`: 위에서 아래로 4·3·2·1층, 각 6개 상품, 좌표·열·이웃·총재고·매대·창고재고 포함.
-- `getWorldConfig`: 기존 24시간 행동 엔진 입력. 1,000 잠재 고객, 기존 점포 seed 및 정확한 초기 재고. JEV provider를 포함하거나 호출하지 않습니다.
+- `getWorldConfig`: 기존 24시간 행동 엔진과 호환되는 입력·검증 계약. 1,000 잠재 고객, 기존 점포 seed 및 정확한 초기 재고. 통합 3D는 계산 결과의 `replay` 기록을 읽으며, JEV provider를 포함하거나 호출하지 않습니다.
 
 ## 30일 분석 모델
 
@@ -31,16 +31,23 @@
 ```js
 {
   storeId, bayId, completed: true, days: 30,
-  engine: { id: 'local-analytic-30day-v1', jevCalled: false, /* 출처·한계 */ },
+  engine: { id: 'local-analytic-30day-v2', jevCalled: false, /* 출처·한계 */ },
   baseline, candidates: [/* A, B, C */], assumptions,
   cohortKey, inputFingerprint, inputs, metricDefinitions,
   personaSource: {dataset, revision, count, sourceIds, behaviorInputFingerprint}
 }
 ```
 
-각 결과는 `candidateId,scenario,name,revenue,profit,stockoutRate,deltaPercent,paidUnits,payments,purchaseDemand,stockoutDemand,daily,positions,initialInventory,finalInventory`를 포함합니다. `stockoutRate`는 0~1 비율입니다. `deltaPercent`는 % 값으로, `100*(후보매출-현재매출)/현재매출`; 현재매출 0이면 비교가능한 증가율이 없어 0을 반환하며 재고 경고를 함께 제공합니다. 이는 0% 개선의 실증이 아닙니다.
+각 결과는 `candidateId,scenario,name,revenue,profit,stockoutRate,deltaPercent,paidUnits,payments,purchaseDemand,stockoutDemand,daily,positions,initialInventory,finalInventory,replay`를 포함합니다. `stockoutRate`는 0~1 비율입니다. `deltaPercent`는 % 값으로, `100*(후보매출-현재매출)/현재매출`; 현재매출 0이면 비교가능한 증가율이 없어 0을 반환하며 재고 경고를 함께 제공합니다. 이는 0% 개선의 실증이 아닙니다.
 
 `daily`는 정확히 30개 `{day:1..30,revenue,profit,payments,paidUnits,purchaseDemand,stockoutDemand,openingInventory,receivedBySKU,paidUnitsBySKU,closingInventory,shelfStock,backroomStock,events,...}`입니다. 모든 합계는 당일 값의 합입니다.
+
+`replay`는 `{version:1,source:'same-forecast-ledger',days:30,binSeconds:3600,cohortKey,timeline,visits,...}`입니다.
+
+- `timeline`: 720개 시간별 기록. 그 시간 전체 잠재 고객·입장·미입장·구매·결품·보충·납품, SKU별 수량, 매대·창고 재고와 전체 누계를 포함합니다. 시간별 합계 = 일별 합계 = 30일 결과입니다. 화면의 매출·재고는 이 기록에서 읽습니다.
+- `visits`: 입장자가 있는 시간마다 공유 고객 목록의 첫 입장자 1명만 뽑은 상세 기록. 하루 최대 24명이며 구매 여부와 관계없이 선택합니다. 동일 점포의 모든 안은 같은 방문 ID를 발췌하므로 구매한 사례만 골라 보여주지 않습니다. 통계적으로 무편향인 대표 표본이라고 주장하지 않습니다.
+- 각 방문은 원본 `sourceId`, 합성 예산, 인지 상품, 결제액, 구매·결품 판단, SKU의 단·열·정확한 좌표 및 해당 시간 행사 ID를 담습니다. 구매/실패 결과가 없는 방문도 남습니다. 상세 방문만 합산한 금액은 전체 매출이 **아닙니다**.
+- 시간 해상도는 1시간입니다. `second`의 시간대 중앙 시점은 화면 배치용 기준일 뿐 실제 관측 입장 시각이 아닙니다. 이동·체류·동시 표시는 재생용 보간이고 구매 결정을 추가하거나 수정하지 않습니다.
 
 ### 실제 수행하는 계산
 
@@ -52,12 +59,22 @@
 
 입력 재현용 fingerprint는 JSON 입력에 대한 비암호학적 FNV-1a입니다. 소스 UUID와 어댑터 예산·선호·행동 조건·시간대·기억도 포함합니다. 보안 서명이나 외부 검증 토큰이 아닙니다. 같은 코드 버전과 입력이면 같은 결과를 반환합니다. 카탈로그는 하나의 불변 입력으로 다루며 내용 변경 시 새 배열로 전달합니다. 진열 좌표를 바꾸어 매출·결품이 달라지는지를 비교하는 수치 모델이지 검증된 인과적 예측이 아닙니다.
 
-### 3D와의 관계를 반드시 표시
+### 같은 기록의 수치와 대표 방문 재생
 
-두 모델이 공유하는 것은 **점포·매대·24 SKU·초기재고·후보·좌표·원본 합성 페르소나 카탈로그**입니다. 30일 분석은 행사 매대의 24개 상품만 계산하며, 전체 점포 상품의 매출이 아닙니다. 다른 일반 매대 위치 효과·사람별 동선·혼잡·직원 이동은 계산하지 않습니다. 입력에 주어진 기억은 고려하지만 구매 후 기억을 다음날로 누적하지 않습니다. 기존 3D는 더 상세한 **별도 하루 행동 관찰**입니다. 3D 수치를 30일 매출의 재생이나 그 수치를 그대로 30배 한 결과로 소개하면 안 됩니다. 30일 숫자는 상세/전광판/승인/점주에서 같은 결과 객체를 사용합니다.
+30일 분석은 행사 매대의 24개 상품만 계산하며, 전체 점포 상품의 매출이 아닙니다. **30일 합계·선택일 합계·시간별 누계·대표 방문**은 같은 실행 결과에서 읽습니다. 전광판은 동일한 일자를 기준으로 현재안과 후보들을 비교하며, 3D 재생은 각 방문에 기록된 구매 SKU·인지 상품·좌표를 보여줍니다. 재생 배속·반복·카메라·표시 인원은 읽기 전용이라 매출과 재고를 바꾸지 않습니다. 승인·점주 화면도 동일 결과 객체의 고정 스냅샷을 사용합니다.
+
+`ledger-replay.js`는 하루 최대 24개 대표 기록 중 최대 12명을 시간대에 걸쳐 고르게 선택합니다. 각자의 기록된 상품 열 앞까지 기존 A* 통로를 사용하고 구매 기록이 있는 상품만 바구니에 넣습니다. 선택일·진행률·0.5/1/2배속은 모든 카드에 공통이며, 자동 이어보기는 30일차에서 멈춥니다. 대표 방문의 이동 경로와 체류 시간은 설명용 시각화입니다. 다른 일반 매대 위치 효과·실제 동선·혼잡·계산대 대기·직원 이동 시간은 경제 계산에 반영하지 않습니다. 입력에 주어진 기억은 고려하지만 구매 후 기억을 다음날로 누적하지 않습니다. 모든 고객을 동시에 이동시키는 30일 물리 시뮬레이션이나 JEV 판단으로 소개하면 안 됩니다. 독립 실행되는 원본 `demo/`의 하루 엔진은 기존 기능으로 보존되지만 통합 화면의 추가 회계 원천이 아닙니다.
+
+### 날짜별 합성 상황
+
+- 4·11·18·25일 17~20시: 비 가정. 입장 비율 ×0.82, 간편식 관심 ×1.15, 음료 관심 ×0.85.
+- 8~14일 10~21시: 신상품 관심 가정. 입장 비율 ×1.03, 프로틴바 관심 ×1.28, 젤리 관심 ×1.22.
+- 20일 14~21시: 인근 주말 행사 가정. 입장 비율은 취식형 ×1.3/다른 맵 ×1.12, 간식 관심 ×1.22, 음료 관심 ×1.18.
+
+기록의 `events`와 시간별 `eventIds`가 상황 설명의 근거입니다. 이는 실제 날씨·SNS 트렌드·축제 개최 기록이 아니며 같은 점포의 모든 안에 동일하게 적용됩니다.
 
 ## 테스트
 
 `node --test workspace/data.test.js workspace/forecast.test.js`
 
-공통 식별자, 기존 엔진의 초기 재고·좌표와 일치, 30일 재현성, 동일 조건, 결제 합산, 일별 재고 보존, 0재고 구매 차단, 보충, 잘못된 입력을 검사합니다. 원본 1,000개 UUID 사용·렌더링용 분류 무관성·생수만 구매·1,600원 예산·가격 변화·신상품 기피·입력 기억도 검사합니다. 인간다운 판단이나 실제 매출 예측 정확도를 검증한 것은 아닙니다.
+공통 식별자, 기존 엔진의 초기 재고·좌표와 일치, 30일 재현성, 동일 조건, 결제 합산, 일별·시간별 재고 보존, 0재고 구매 차단, 보충, 잘못된 입력을 검사합니다. 원본 1,000개 UUID 사용·렌더링용 분류 무관성·생수만 구매·1,600원 예산·가격 변화·신상품 기피·입력 기억도 검사합니다. 시간별 원장과 일별·총계의 일치, 같은 방문 표본, 대표 방문의 결제·좌표 근거를 추가로 검사합니다. 인간다운 판단이나 실제 매출 예측 정확도를 검증한 것은 아닙니다.

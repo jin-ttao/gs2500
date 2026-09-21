@@ -166,3 +166,88 @@ test('malformed or duplicate source-person records cannot silently fall back to 
     assert.throws(()=>simulateComparison({...base,populationPerDay:2,personaCatalog}),TypeError);
   }
 });
+
+test('the replay ledger reconciles every hourly payment and inventory movement to the same 30-day result', () => {
+  const comparison=simulateComparison({...base,populationPerDay:75});
+  for(const result of [comparison.baseline,...comparison.candidates]) {
+    const {replay}=result;
+    assert.equal(replay.source,'same-forecast-ledger'); assert.equal(replay.jevCalled,false);
+    assert.equal(replay.timeline.length,30*24); assert.ok(replay.visits.length<=30*24);
+    assert.equal(replay.cohortKey,result.cohortKey);
+    let previousShelf=result.initialInventory.shelf, previousBackroom=result.initialInventory.backroom;
+    const cumulative={potential:0,revenue:0,profit:0,paidUnits:0,payments:0,entered:0,purchaseDemand:0,stockoutDemand:0,replenishedUnits:0,receivedUnits:0};
+    for(const [index,bin] of replay.timeline.entries()) {
+      assert.equal(bin.startSecond,index*3600); assert.equal(bin.endSecond,(index+1)*3600);
+      assert.equal(bin.day,Math.floor(index/24)+1); assert.equal(bin.hour,index%24);
+      assert.equal(bin.potential,bin.entered+bin.skipped);
+      assert.equal(bin.purchaseDemand,bin.paidUnits+bin.stockoutDemand);
+      assert.equal(bin.revenue,sum(PRODUCTS.map(p=>p.price*bin.paidUnitsBySKU[p.id])));
+      assert.equal(bin.profit,sum(PRODUCTS.map(p=>(p.price-result.costs[p.id])*bin.paidUnitsBySKU[p.id])));
+      assert.equal(bin.stockoutDemand,sum(Object.values(bin.stockoutBySKU)));
+      assert.equal(bin.receivedUnits,sum(bin.transfers.filter(t=>t.type==='delivery').map(t=>t.quantity)));
+      assert.equal(bin.replenishedUnits,sum(bin.transfers.filter(t=>t.type==='replenishment').map(t=>t.quantity)));
+      for(const product of PRODUCTS) {
+        const id=product.id;
+        const received=sum(bin.transfers.filter(t=>t.type==='delivery'&&t.productId===id).map(t=>t.quantity));
+        const replenished=sum(bin.transfers.filter(t=>t.type==='replenishment'&&t.productId===id).map(t=>t.quantity));
+        assert.equal(bin.shelfStock[id],previousShelf[id]+replenished-bin.paidUnitsBySKU[id]);
+        assert.equal(bin.backroomStock[id],previousBackroom[id]+received-replenished);
+        assert.ok(bin.shelfStock[id]>=0); assert.ok(bin.backroomStock[id]>=0);
+      }
+      previousShelf=bin.shelfStock; previousBackroom=bin.backroomStock;
+      for(const key of Object.keys(cumulative)) {
+        cumulative[key]+=bin[key]; assert.equal(bin.cumulative[key],cumulative[key]);
+      }
+      if(bin.hour===23) {
+        const day=result.daily[bin.day-1], dayBins=replay.timeline.slice(index-23,index+1);
+        for(const key of Object.keys(cumulative))assert.equal(day[key],sum(dayBins.map(item=>item[key])));
+        assert.deepEqual(bin.shelfStock,day.shelfStock); assert.deepEqual(bin.backroomStock,day.backroomStock);
+      }
+    }
+    for(const key of Object.keys(cumulative)) assert.equal(cumulative[key],result[key]);
+    assert.deepEqual(previousShelf,result.finalShelf); assert.deepEqual(previousBackroom,result.finalBackroom);
+  }
+});
+
+test('replay samples the same cohort people across plans and contains only decisions made by that calculation', () => {
+  const comparison=simulateComparison({...base,populationPerDay:150});
+  const cohortSamples=comparison.baseline.replay.visits.map(({id,day,hour,sourceId,second,budget})=>({id,day,hour,sourceId,second,budget}));
+  for(const result of [comparison.baseline,...comparison.candidates]) {
+    assert.deepEqual(result.replay.visits.map(({id,day,hour,sourceId,second,budget})=>({id,day,hour,sourceId,second,budget})),cohortSamples);
+    assert.deepEqual(result.replay.timeline.map(bin=>[bin.potential,bin.entered,bin.sampleVisitId]),comparison.baseline.replay.timeline.map(bin=>[bin.potential,bin.entered,bin.sampleVisitId]));
+    assert.equal(new Set(result.replay.visits.map(v=>`${v.day}:${v.hour}`)).size,result.replay.visits.length);
+    for(const visit of result.replay.visits) {
+      const bin=result.replay.timeline[(visit.day-1)*24+visit.hour];
+      assert.ok(visit.second>=bin.startSecond&&visit.second<bin.endSecond);
+      assert.equal(bin.sampleVisitId,visit.id); assert.ok(bin.entered>0);
+      assert.equal(visit.paidAmount,sum(visit.decisions.map(d=>d.paidAmount)));
+      assert.equal(visit.paidUnits,visit.decisions.filter(d=>d.outcome==='purchased').length);
+      assert.ok(visit.paidAmount<=visit.budget); assert.ok(visit.paidAmount<=bin.revenue);
+      for(const decision of visit.decisions) {
+        const position=result.positions[decision.productId];
+        assert.ok(visit.visibleProductIds.includes(decision.productId));
+        assert.equal(decision.fixtureId,'promo'); assert.equal(decision.fixtureId,position.fixtureId);
+        assert.equal(decision.locationId,position.locationId); assert.deepEqual(decision.position,position.position);
+        assert.equal(decision.level,position.level); assert.equal(decision.column,position.column);
+        if(decision.outcome==='purchased')assert.equal(decision.paidAmount,decision.price);
+        else {assert.equal(decision.outcome,'shelf-empty');assert.equal(decision.paidAmount,0);}
+      }
+    }
+  }
+});
+
+test('zero-stock replay cannot introduce animated purchases or ledger revenue', () => {
+  const comparison=simulateComparison({...base,populationPerDay:40,inventoryOverrides:{totalStock:Object.fromEntries(PRODUCTS.map(p=>[p.id,0]))}});
+  for(const result of [comparison.baseline,...comparison.candidates]) {
+    assert.ok(result.replay.visits.length>0);
+    assert.ok(result.replay.visits.some(v=>v.decisions.length>0));
+    for(const visit of result.replay.visits) {
+      assert.equal(visit.paidAmount,0); assert.equal(visit.paidUnits,0);
+      assert.ok(visit.decisions.every(d=>d.outcome==='shelf-empty'));
+    }
+    for(const bin of result.replay.timeline) {
+      assert.equal(bin.revenue,0); assert.equal(bin.cumulative.revenue,0);
+      assert.equal(bin.transfers.length,0);
+    }
+  }
+});
