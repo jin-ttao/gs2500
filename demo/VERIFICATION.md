@@ -1,5 +1,144 @@
 # Verification — 2026-09-21
 
+## Latest: sixteen live cards, four candidates, paged stores, slower playback
+
+This section supersedes the older three-store/nine-world board and 900× default
+below. The current board owns **nine synthetic stores × four real alternatives =
+36 worlds**, split into store pages **4 + 4 + 1**. The final page intentionally has
+four cards, not fabricated duplicate stores. Candidate D is `discovery` (신상품 탐색안).
+
+- `npm test`: **88/88 passed** (17.1 seconds). Includes all 36 common card templates,
+  unique 24-SKU layouts, equal same-store cohorts, default 4×, selection preserving
+  world identity, all nine map formats at a bounded horizon, and eight pager tests.
+- `npm run build`, `node --check app.js`, and `git diff --check` passed. Both new
+  pager JavaScript and page-layout CSS are explicitly allowlisted into `dist`.
+- The full-day verification script uses the explicit `everyday` group: three
+  stores × four alternatives = **12 worlds**, 1,000 potentials each, exactly 24:00.
+  Agent-run full-day checks passed in 40.9 headless wall seconds; this is neither a
+  36-world full-day benchmark nor a browser rendering performance claim.
+- Chrome, **1512×805**: all 16 views in page 1 rendered; each 3D viewport was about
+  54 CSS pixels high after fixing a footer-clipping issue. No footer exceeded its
+  card. **774×863**: all 16 cards fit onscreen, 70px 3D views, no footer clipping,
+  document width exactly 774px.
+- **390×844** responsive viewport: four stores stack vertically per page, each
+  retaining its 2×2 candidate grid. Document width exactly 390px; no clipped
+  footers. Vertical scrolling exposed subsequent stores without changing page.
+  This is a desktop responsive emulation, not a physical touch-device test.
+- Mouse drag advanced one store page without opening a card. A subsequent normal
+  click opened university candidate D; closing restored focus to that same card.
+  Arrow buttons and page dots also worked. Native touch is browser-controlled and
+  covered by unit checks that touch/vertical gestures are not manually prevented.
+- Running at default 4×: **27.685 wall seconds → 110.8 simulated seconds (4.002×)**.
+  All 36 worlds had identical times, including offscreen stores. Page 2 had 16
+  actual visible renderer views, each matching the source time. Pausing at 159.8s
+  and navigating to page 3 retained 159.8s and the same execution generation;
+  exactly four visible views remained. Paging never calls reset or setStoreGroup.
+- After explicitly fast-forwarding and returning to 4×, pause at 1823.5s and
+  reveal page 2: all four university candidates had an active shopper. Their
+  actual rendered shopper positions, states, and times exactly matched source
+  worlds. This checks restoration with real agents, not just empty-store clocks.
+- Temporary browser size overrides were reset. Tests use synthetic data and
+  local decisions; no GS, JEV, Nemotron, paid API, or external deployment is added.
+
+## Historical: course-card design adaptation
+
+The user-provided React example supplied header/body/footer markup and palette
+tokens, but no complete layout CSS. Its visual structure was adapted into the
+existing vanilla-JavaScript application, without adding React, Tailwind, or remote
+portrait dependencies. All nine cards use the same template; A/B/C consistently
+use green/orange/blue. Existing worlds and accounting were not changed.
+
+- `npm test`: **75/75 passed** (~15.7 seconds), including three new template tests
+  for nine identical structures, unique live hooks, escaped text, and no nested
+  interactive controls or external placeholder assets.
+- `npm run build` includes the new component and scoped stylesheet explicitly.
+- At the native 774px width, all nine cards had equal 218px heights, positive 60px
+  3D viewports, and footers fully inside their own cards. The board scrolls when
+  the window is too short; the shared renderer clips against this ancestor.
+- A 1440px-wide responsive check showed all nine 3D views and matching source/
+  renderer times, run IDs, shopper coordinates, and stock-worker coordinates.
+- Pause froze all nine source snapshots. Progress text 44.5%, ARIA value 44.5,
+  and the actual bar width 44.5162% agreed to displayed precision.
+- At 390px, document and scroll widths both equaled 390; all three selected-store
+  cards had equal 485px heights, unclipped footers, and contained numeric metrics.
+  Switching store tabs preserved simulation time and did not open the inspector.
+  A card opened the matching live world; Escape closed it and restored card focus.
+- The outer card retains its keyboard button behavior and receives an updated
+  `aria-description` for clock/progress/entry/buyer/revenue, since button descendants
+  alone do not reliably expose every metric to assistive technology.
+
+## Historical: fixed 24-hour day, potential entry, and finite replenishment
+
+This section supersedes the mandatory-visit/depletion model described in the
+historical checks below. The UI now uses `createLab({mode:'day'})` by default.
+Each store has 1,000 potential people spread over 00:00–24:00; its three candidates
+reuse that same seeded cohort. They are not 9,000 independent customers.
+
+- `npm test`: **72/72 pass** (~16.4 seconds). New daily tests cover exactly 86,400
+  seconds, all potentials considered, need/closed/crowded refusal reasons, shared
+  A/B/C schedules, finite partial refills, unpaid cutoff returns, no late payment,
+  immutable snapshots, arbitrary frame partition replay, and owner pose timing.
+- The daily lab's final fractional tick is tested at horizons 0.01, 0.03, 0.13 and
+  1.03 seconds. The default full-day horizon remains exactly 86,400 seconds.
+- Independent stock checks on office/express/riverside inspected all SKU quantities
+  over 18,000 total ticks: no negative/capacity-exceeding stock, conserved shelf +
+  backroom + unpaid baskets + paid quantities, and frozen post-cutoff state.
+- Replenishment-only path checks on all nine map formats remained on walkable
+  geometry. Worker/customer dynamic collision avoidance is not modeled.
+- `npm run test:day` ran the production nine-world, 1,000-potential-person-per-store
+  configuration to exactly 24:00 in **36.9 headless wall seconds**. It checks each
+  candidate's cohort, clock, stock conservation, payment ledger, hourly totals,
+  and final freeze. This is not a browser playback benchmark.
+
+| Store / standard candidate A | Potential | Entered | Passed by | Buyers | Simulated revenue | Refills | Shelf + backroom remaining |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: | ---: |
+| 삼성역점 | 1,000 | 605 | 395 | 438 | ₩1,603,200 | 76 | 206 + 2,035 |
+| 역세권 데모점 | 1,000 | 590 | 410 | 385 | ₩1,320,500 | 64 | 219 + 1,683 |
+| 주거지 데모점 | 1,000 | 543 | 457 | 439 | ₩1,726,000 | 71 | 180 + 2,610 |
+
+All nine candidates retained inventory when the day ended. Revenue is booked only
+on the engine's payment event; the renderer does not independently calculate sales.
+Full JSON export retains all events, with a separate recent replenishment history
+so ordinary shopper events cannot hide the latest transfers in the daily panel.
+
+Browser checks on the daily model confirmed all nine visible cards use the same
+source timestamps/run IDs and exact customer/worker coordinates. At the observed
+16:04:04.75 pause, the entire synchronization probe remained byte-identical across
+checks. The detailed renderer matched the selected source time and worker position;
+its shelf view contained all 24 products, shelf/backroom quantities, and a disabled
+approval action before day completion. A 390px viewport had document/scroll widths
+of 390px with no horizontal overflow.
+
+Final browser rerun after the lightweight rendering snapshots were integrated:
+
+- At requested 900×, all nine worlds were observed complete within **149.3 wall
+  seconds** of starting, at exactly 24:00:00. This is an observation upper bound,
+  not an exact completion timestamp or a guaranteed runtime. Samples of actual
+  speed were approximately 500–660×, honestly lower than the requested speed.
+- All nine final paid-revenue values matched `test:day` exactly despite different
+  browser frame timing. Every cohort had considered = entered + skipped = 1,000;
+  all worlds retained inventory and had zero active customers.
+- The recent-transfer panel showed real finite transfers, including 6 coffees:
+  shelf 2→8 and backroom 10→4. Its count and latest records remained available
+  after unrelated shopper events.
+- Samsung A could not be approved mid-day; its approval became enabled after
+  24:00. Before approval the owner page showed no daily plan. After the local test
+  approval it showed exactly Samsung A, with 605 entries, 395 passersby, 438 buyers,
+  and ₩1,603,200 simulated revenue. Unapproved station store still showed no plan.
+- The approved owner page at 390×844 contained all 24 SKU cards with no horizontal
+  overflow. The viewport override was then removed and the completed nine-card
+  comparison was restored. No browser warnings/errors were captured.
+- `npm run build` passed; eight generated runtime modules matched their source
+  files byte-for-byte and the bundled Three.js import target existed. No remote
+  deployment or push was performed for this change.
+
+These are authored, uncalibrated assumptions: hourly arrival weights, entry intent,
+inventory capacities, event effects, and separate cashier/replenishment staff.
+The day is an observation window, not actual store closure: at its cutoff, unpaid
+baskets are returned to backroom stock and no after-window payment is included.
+SKU shelf stock is pooled across displays, with refill service at the promo station.
+No real POS data, supplier ordering, JEV call, or real-world revenue validation was used.
+
 ## Shared simulation and payment accounting
 
 The comparison uses nine spatial worlds: three synthetic stores × three shelf

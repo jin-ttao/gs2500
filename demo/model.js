@@ -16,11 +16,34 @@ export const PRODUCTS = [
   { id: 'zero', name: '제로 스파클링', category: 'drink', price: 2000, stock: 150, color: '#64b9b7', label: 'ZERO', shape: 'can', promo: true },
   { id: 'noodle', name: '컵라면', category: 'meal', price: 1800, stock: 190, color: '#df6b4b', label: 'NOODLE', shape: 'cup' },
   { id: 'cookie', name: '초코 쿠키', category: 'snack', price: 2200, stock: 170, color: '#e6afbe', label: 'COOKIE', shape: 'box' },
-];
+  { id:'water',name:'맑은샘 생수',category:'drink',price:1100,stock:160,color:'#b4ddec',label:'WATER',shape:'bottle' },
+  { id:'milk',name:'아침 우유',category:'drink',price:1900,stock:110,color:'#f0e3bd',label:'MILK',shape:'box' },
+  { id:'tea',name:'유자 아이스티',category:'drink',price:2300,stock:105,color:'#c6d671',label:'YUJA TEA',shape:'bottle',promo:true },
+  { id:'juice',name:'자몽 주스',category:'drink',price:2600,stock:95,color:'#efa18b',label:'JUICE',shape:'bottle' },
+  { id:'sandwich',name:'에그 샌드위치',category:'meal',price:3400,stock:100,color:'#dec98a',label:'SANDWICH',shape:'box',promo:true },
+  { id:'kimbap',name:'참치 꼬마김밥',category:'meal',price:2900,stock:115,color:'#54866b',label:'KIMBAP',shape:'box' },
+  { id:'bento',name:'데일리 도시락',category:'meal',price:4800,stock:85,color:'#b78963',label:'BENTO',shape:'box' },
+  { id:'soup',name:'든든 컵수프',category:'meal',price:2100,stock:100,color:'#dca964',label:'SOUP',shape:'cup' },
+  { id:'chocolate',name:'다크 초콜릿',category:'snack',price:1800,stock:145,color:'#8b6272',label:'CHOCO',shape:'box' },
+  { id:'gummy',name:'톡톡 과일젤리',category:'snack',price:1600,stock:150,color:'#e383aa',label:'GUMMY',shape:'bag',promo:true },
+  { id:'popcorn',name:'카라멜 팝콘',category:'snack',price:2000,stock:130,color:'#e5c484',label:'POPCORN',shape:'bag' },
+  { id:'cracker',name:'담백 크래커',category:'snack',price:1500,stock:125,color:'#bfac83',label:'CRACKER',shape:'box' },
+  { id:'proteinbar',name:'크런치 프로틴바',category:'health',price:2500,stock:100,color:'#aaa1d8',label:'PROTEIN BAR',shape:'box',promo:true },
+  { id:'yogurt',name:'플레인 요거트',category:'health',price:2300,stock:95,color:'#cfbfe2',label:'YOGURT',shape:'cup' },
+  { id:'eggs',name:'구운 달걀 두알',category:'health',price:2400,stock:95,color:'#cfb894',label:'EGGS',shape:'box' },
+  { id:'fruit',name:'한입 과일컵',category:'health',price:3200,stock:80,color:'#c6bc6c',label:'FRUIT',shape:'cup' },
+].map(product=>{
+  const launchDaysAgo={chips:14,tea:12,sandwich:20,gummy:7,proteinbar:9}[product.id]??180;
+  const isNew=launchDaysAgo<=30;
+  return {...product,isNew,launchDaysAgo,tags:[product.category,isNew?'신상품 가정':'기존 상품 가정',...(product.promo?['프로모션 가정']:[])],
+    trend:{label:isNew?'합성 신상품 관심':'합성 기본 관심',strength:isNew?.75:.20,source:'authored-demo-fixture',status:'assumed',confidence:.35},
+    provenance:{source:'authored-demo-fixture',status:'assumed',realProduct:false}};
+});
 export const SCENARIOS = {
-  hq: { title: '본사 표준안', note: '행사 상품 중심의 기본 배치', levels: [['nuts', 'cookie'], ['rice', 'zero'], ['protein', 'chips'], ['coffee', 'noodle']] },
-  owner: { title: '재고 우선안', note: '보유 재고가 많은 상품을 가운데로', levels: [['protein', 'nuts'], ['noodle', 'cookie'], ['chips', 'zero'], ['rice', 'coffee']] },
-  balanced: { title: '균형 후보안', note: '방문 미션과 재고를 함께 고려', levels: [['nuts', 'protein'], ['rice', 'noodle'], ['chips', 'coffee'], ['zero', 'cookie']] },
+  hq: { title: '본사 표준안', note: '신상품과 행사 상품 중심의 기본 배치', levels: [['nuts','cookie','water','fruit','cracker','eggs'],['rice','zero','milk','kimbap','soup','yogurt'],['protein','chips','tea','gummy','sandwich','proteinbar'],['coffee','noodle','juice','bento','chocolate','popcorn']] },
+  owner: { title: '재고 우선안', note: '보유 재고가 많은 상품을 가운데로', levels: [['protein','nuts','tea','yogurt','fruit','eggs'],['noodle','cookie','bento','cracker','popcorn','milk'],['chips','zero','gummy','chocolate','water','soup'],['rice','coffee','sandwich','kimbap','proteinbar','juice']] },
+  balanced: { title: '균형 후보안', note: '방문 미션과 보완 상품 이웃을 함께 고려', levels: [['nuts','protein','eggs','fruit','yogurt','water'],['rice','noodle','sandwich','bento','kimbap','soup'],['chips','coffee','gummy','cookie','proteinbar','tea'],['zero','milk','juice','chocolate','popcorn','cracker']] },
+  discovery: { title: '신상품 탐색안', note: '합성 신상품 5종을 2층에 모으고 3층에 함께 고를 상품을 배치', levels: [['noodle','bento','soup','rice','kimbap','eggs'],['chips','tea','sandwich','gummy','proteinbar','coffee'],['zero','juice','cookie','chocolate','nuts','yogurt'],['water','milk','protein','fruit','popcorn','cracker']] },
 };
 export const PRODUCT_MAP = Object.fromEntries(PRODUCTS.map(p => [p.id, p]));
 export const LEVEL_Y = [.36, .87, 1.38, 1.89];

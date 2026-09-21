@@ -71,7 +71,7 @@ test('same seed replays exactly, independent stores vary, snapshots are detached
   assert.notDeepEqual(a.snapshot().agents.map(p=>[p.profileIndex,p.speed]),other.snapshot().agents.map(p=>[p.profileIndex,p.speed]));
   const snap=a.snapshot();assert.deepEqual(JSON.parse(JSON.stringify(snap)),snap);
   assert.equal(snap.runId,'repeatable');assert.equal(snap.scenario,'owner');
-  assert.ok(snap.events.length<=15);
+  assert.ok(snap.events.length<=60);
   assert.ok(snap.events.every((e,i)=>i===0||(e.time>=snap.events[i-1].time&&e.id>snap.events[i-1].id)));
   const original=a.snapshot();a.update(0);assert.deepEqual(a.snapshot(),original);
   snap.stock.coffee=-100;snap.levels[0].pick=-100;snap.profileCounts[0]=-100;

@@ -1,9 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { createLab, LAB_STORES } from './lab.js';
-import { PRODUCT_MAP } from './model.js';
+import { createLab as createDailyLab, LAB_STORES } from './lab.js';
+import { PRODUCT_MAP, SCENARIOS } from './model.js';
 
 const unlimited = { budgetMs: Infinity };
+// Keep the original finite-visit engine's regressions explicit. The browser now
+// uses day mode; its horizon/admission/replenishment contracts have separate tests.
+const createLab = options => createDailyLab({storeGroup:'everyday', ...options, mode:'visits'});
+const candidateCount = LAB_STORES.length * Object.keys(SCENARIOS).length;
 const nearlyEqual = (actual, expected, message) => assert.ok(
   Math.abs(actual - expected) < 1e-8,
   message ?? `${actual} should equal ${expected}`,
@@ -21,25 +25,27 @@ function actualRuns(lab) {
 
 function worldStates(lab) {
   return actualRuns(lab).map(run => {
-    const { runId, ...state } = run.world.snapshot();
-    return state;
+    // A fresh execution has a fresh identity throughout its decision/ledger records.
+    // Compare every simulation value, excluding only those execution identities.
+    return JSON.parse(JSON.stringify(run.world.snapshot(), (key, value) => key === 'runId' ? undefined : value));
   });
 }
 
-test('lab owns nine independent live worlds in three stores and three scenarios', () => {
+test('the explicit everyday group owns twelve independent worlds in three stores and four scenarios', () => {
   const lab = createLab({ limit: 20 });
   const runs = actualRuns(lab);
   assert.equal(LAB_STORES.length, 3);
-  assert.equal(runs.length, 9);
-  assert.equal(new Set(runs.map(run => run.id)).size, 9);
-  assert.equal(new Set(runs.map(run => run.world)).size, 9);
-  assert.equal(new Set(runs.map(run => run.world.stock)).size, 9);
-  assert.equal(new Set(runs.map(run => run.world.runId)).size, 9);
-  for (const scenario of ['hq', 'owner', 'balanced']) {
+  assert.equal(candidateCount, 12);
+  assert.equal(runs.length, candidateCount);
+  assert.equal(new Set(runs.map(run => run.id)).size, candidateCount);
+  assert.equal(new Set(runs.map(run => run.world)).size, candidateCount);
+  assert.equal(new Set(runs.map(run => run.world.stock)).size, candidateCount);
+  assert.equal(new Set(runs.map(run => run.world.runId)).size, candidateCount);
+  for (const scenario of Object.keys(SCENARIOS)) {
     assert.equal(runs.filter(run => run.world.scenario === scenario).length, 3);
   }
   assert.equal(lab.snapshot().completed, 0);
-  assert.equal(lab.snapshot().total, 9);
+  assert.equal(lab.snapshot().total, candidateCount);
   assert.equal(lab.snapshot().time, 0);
   assert.equal(lab.snapshot().running, false);
 });
@@ -180,18 +186,18 @@ test('an exhausted frame budget slows every world together and retains backlog',
   assert.deepEqual(worldStates(lab), before);
 });
 
-test('all nine candidates finish bounded visits and preserve their final metrics', () => {
+test('all twelve everyday candidates finish bounded visits and preserve their final metrics', () => {
   const lab = createLab({ limit: 20, speed: 128 });
   lab.start();
   for (let i = 0; i < 10 && lab.snapshot().running; i++) {
     lab.advance(1, unlimited);
   }
   const result = lab.snapshot();
-  assert.equal(result.completed, 9,
+  assert.equal(result.completed, candidateCount,
     JSON.stringify(result.runs.map(run => ({ id: run.id, status: run.status, error: run.error, completed: run.completed }))));
   assert.equal(result.running, false);
   assert.equal(result.effectiveSpeed, 0);
-  assert.equal(result.total, 9);
+  assert.equal(result.total, candidateCount);
   assert.ok(result.time <= 1280);
   for (const run of actualRuns(lab)) {
     assert.equal(run.status, 'complete');
@@ -254,7 +260,7 @@ test('every displayed sale and profit is accounted for by actual payment events'
       assert.equal(summary.paidGrossProfit, record.profit);
     }
   }
-  assert.equal(lab.snapshot().completed, 9);
+  assert.equal(lab.snapshot().completed, candidateCount);
   assert.ok(observedUnpaidBasket, 'putting an item into a basket must not book revenue');
   assert.ok([...records.values()].every(record => record.payments > 0));
 });

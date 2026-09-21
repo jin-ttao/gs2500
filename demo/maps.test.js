@@ -7,8 +7,8 @@ import { PRODUCTS } from './model.js';
 
 test('floor plans have distinct geometry and consistent local-to-world transforms', () => {
   const maps=Object.values(STORE_MAPS);
-  assert.equal(maps.length,5);
-  assert.equal(new Set(maps.map(m=>JSON.stringify(m.fixtures))).size,5);
+  assert.equal(maps.length,9);
+  assert.equal(new Set(maps.map(m=>JSON.stringify(m.fixtures))).size,9);
   assert.throws(()=>getMap('missing'),/Unknown store map/);
   const rotated=maps.find(m=>m.id==='express').fixtures[0];
   const p=localToWorld(rotated,[0,1.45]);
@@ -27,6 +27,18 @@ test('floor plans have distinct geometry and consistent local-to-world transform
       const overlapZ=Math.min(a[3],b[3])-Math.max(a[2],b[2]);
       assert.ok(overlapX<=.001||overlapZ<=.001,`${map.id}: ${map.fixtures[i].id} overlaps ${map.fixtures[j].id}`);
     }
+  }
+});
+
+test('nine regions have distinct themes, real shelf widths and exterior props',()=>{
+  const maps=Object.values(STORE_MAPS);
+  assert.equal(new Set(maps.map(m=>m.region)).size,9);
+  assert.equal(new Set(maps.map(m=>m.theme.floor)).size,9);
+  assert.ok(new Set(maps.flatMap(m=>m.fixtures.filter(f=>f.type==='gondola').map(f=>f.scale))).size>=8);
+  for(const map of maps){
+    assert.ok(map.props.length>=2);
+    for(const key of ['floor','wall','accent','shelf','prop'])assert.match(map.theme[key],/^#[0-9a-f]{6}$/i);
+    for(const prop of map.props){assert.equal(prop.decorative,true);assert.ok(Math.abs(prop.x)>map.width/2+.5||Math.abs(prop.z)>map.depth/2+.5);}
   }
 });
 

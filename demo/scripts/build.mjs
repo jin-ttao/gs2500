@@ -11,8 +11,12 @@ await mkdir(join(output, 'vendor', 'three'), { recursive: true });
 const modules = [
   'app.js', 'card-worlds.js', 'characters.js', 'lab.js', 'maps.js',
   'model.js', 'navigation.js', 'store.js', 'world.js', 'styles.css',
+  'context.js', 'merchandising.js', 'day.js', 'simulation-cards.css', 'store-pages.css',
 ];
 await Promise.all(modules.map(name => cp(join(root, name), join(output, name))));
+await mkdir(join(output, 'components', 'ui'), { recursive: true });
+await cp(join(root, 'components', 'ui', 'simulation-card.js'), join(output, 'components', 'ui', 'simulation-card.js'));
+await cp(join(root, 'components', 'ui', 'store-pager.js'), join(output, 'components', 'ui', 'store-pager.js'));
 await mkdir(join(output, 'assets'));
 const assets = ['shopper.glb', 'coffee-machine.glb', 'checkout-terminal.glb', 'product-atlas.png', 'ASSET_NOTES.md'];
 await Promise.all(assets.map(name => cp(join(root, 'assets', name), join(output, 'assets', name))));

@@ -3,11 +3,22 @@ import assert from 'node:assert/strict';
 import { PRODUCTS, PROFILES, SCENARIOS, randomAt, createExperiment, visit, simulate } from './model.js';
 
 test('scenarios contain the same complete catalog exactly once', () => {
+  assert.deepEqual(Object.keys(SCENARIOS), ['hq', 'owner', 'balanced', 'discovery']);
+  assert.equal(new Set(Object.values(SCENARIOS).map(scenario => JSON.stringify(scenario.levels))).size, 4);
   for (const scenario of Object.values(SCENARIOS)) {
     assert.equal(scenario.levels.length, 4);
     assert.deepEqual(scenario.levels.flat().sort(), PRODUCTS.map(p => p.id).sort());
-    assert.ok(scenario.levels.every(level => level.length === 2));
+    assert.ok(scenario.levels.every(level => level.length === 6));
   }
+});
+
+test('the discovery candidate exposes every authored new product together without changing the catalog', () => {
+  assert.equal(SCENARIOS.discovery.title, '신상품 탐색안');
+  const newProducts = PRODUCTS.filter(product => product.isNew);
+  assert.equal(newProducts.length, 5);
+  assert.ok(newProducts.every(product => SCENARIOS.discovery.levels[1].includes(product.id)));
+  assert.notDeepEqual(simulate('discovery').stock, simulate('hq').stock,
+    'the different positions should change actual choices, not just the candidate label');
 });
 
 test('seeded visitors and full experiments are reproducible', () => {
@@ -34,7 +45,7 @@ test('all scenarios account for inventory, prices, visits and shelf events', () 
     assert.equal(result.levels.reduce((sum, level) => sum + level.pick, 0), units);
     assert.equal(result.levels.reduce((sum, level) => sum + level.notice, 0), result.decisions);
     result.levels.forEach(level => {
-      assert.equal(level.exposure, 2000);
+      assert.equal(level.exposure, 6000);
       assert.ok(level.pick <= level.notice && level.notice <= level.exposure);
     });
   }

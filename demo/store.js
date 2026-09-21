@@ -6,7 +6,9 @@ import { RoomEnvironment } from 'three/addons/environments/RoomEnvironment.js';
 import { loadCharacters } from './characters.js';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { STATE_NAMES } from './world.js';
-import { getMap, localToWorld } from './maps.js';
+import { getMap, localToWorld, getMapDecor } from './maps.js';
+import { getFixturePlacements } from './merchandising.js';
+import { createOwnerVisual, syncOwnerVisual } from './card-worlds.js';
 
 export async function createStore(root, onAgentSelect) {
   const loader=new GLTFLoader();
@@ -51,6 +53,7 @@ export async function createStore(root, onAgentSelect) {
     const mesh = new THREE.Mesh(geometry, material(color));
     if (!rounded) mesh.scale.set(...size);
     mesh.position.set(...position);
+    mesh.userData.baseColor=color;
     mesh.castShadow = mesh.receiveShadow = true;
     parent.add(mesh);
     return mesh;
@@ -123,6 +126,15 @@ export async function createStore(root, onAgentSelect) {
   const boundaries=[0,.237,.498,.745,1];
   const packageInstances=new Set();
   const packagingMaterials=PRODUCTS.map((product,index)=>{
+    if(index>=8){
+      const canvas=document.createElement('canvas');canvas.width=256;canvas.height=384;
+      const ctx=canvas.getContext('2d');ctx.fillStyle=product.color;ctx.fillRect(0,0,256,384);
+      ctx.fillStyle='#faf4dc';ctx.fillRect(12,72,232,118);ctx.fillStyle='#263d38';ctx.font='bold 28px Arial, sans-serif';ctx.textAlign='center';
+      ctx.fillText(product.label||product.name,128,119,216);ctx.font='18px Arial, sans-serif';ctx.fillText(product.name,128,157,216);
+      ctx.fillStyle='#f8f0d5';ctx.font='16px Arial, sans-serif';ctx.fillText('GS2500 · SYNTHETIC',128,333,226);
+      const texture=new THREE.CanvasTexture(canvas);texture.colorSpace=THREE.SRGBColorSpace;
+      return new THREE.MeshStandardMaterial({map:texture,roughness:.55});
+    }
     const row=Math.floor(index/2), texture=atlas.clone();texture.needsUpdate=true;
     texture.repeat.set(.498,boundaries[row+1]-boundaries[row]-.004);
     texture.offset.set((index%2)*.5+.001,1-boundaries[row+1]+.002);
@@ -134,8 +146,7 @@ export async function createStore(root, onAgentSelect) {
     block(fridge,[2.08,2.4,.83],[0,1.22,0],'#334e55',true);
     block(fridge,[1.94,2.12,.07],[0,1.25,.45],'#c0d8d3');
     for (let l=0;l<4;l++) {
-      block(fridge,[1.9,.045,.38],[0,.35+l*.48,.57],'#91aba4');
-      for (let j=0;j<8;j++) packageModel(fridge,PRODUCTS[[0,1,5][(j+l+f)%3]],-.81+j*.232,.38+l*.48,.61,.68);
+      block(fridge,[1.9,.045,.38],[0,.27+l*.49,.57],'#91aba4');
     }
     block(fridge,[.055,2.14,.065],[0,1.22,.79],'#3b5860');
     for(const x of [-.94,.94]) {
@@ -182,7 +193,6 @@ export async function createStore(root, onAgentSelect) {
         const y=.29+l*.46;
         block(g,[3.79,.065,.48],[0,y,side*.31],'#f3efd8');
         block(g,[3.77,.075,.03],[0,y,side*.565],'#659487');
-        for(let i=0;i<9;i++) packageModel(g,PRODUCTS[(i+l*3+(x>0?2:0))%8],-1.61+i*.4,y+.045,side*.32,.82);
       }
     }
     return g;
@@ -242,21 +252,27 @@ export async function createStore(root, onAgentSelect) {
   sign(promo,'THIS WEEK  |  2+1',2.48,.28,[0,2.59,.28],'#70a78e','#fff9df',42);
   const highlight = new THREE.Mesh(new THREE.BoxGeometry(2.62,.46,1.04),new THREE.MeshBasicMaterial({color:'#d9efa1',transparent:true,opacity:.16,depthWrite:false}));promo.add(highlight);
   const productGroups=[];
+  const neighbourhood=new THREE.Group();store.add(neighbourhood);
+  let renderedPlacements=[];
   // Renderer observes a lab-owned world; it never creates or advances a simulation.
-  let world=null,lastWorldTime=0,renderedTime=0,renderedRunId=null;
+  let world=null,lastWorldTime=0,renderedTime=0,renderedRunId=null,renderedOwner=null,ownerActor=null;
   function applyLayout(key) {
     scenarioKey=key;
     productGroups.forEach(g=>{
-      promo.remove(g);packageInstances.delete(g);
+      g.parent?.remove(g);packageInstances.delete(g);
       g.traverse(child=>{
         if(child.geometry && child.geometry!==cubeGeometry && child.geometry!==cylinderGeometry) child.geometry.dispose();
       });
     });
     productGroups.length=0;
-    SCENARIOS[key].levels.forEach((ids,l)=>ids.forEach((id,j)=>{
-      for(let copy=0;copy<3;copy++) productGroups.push(packageModel(promo,PRODUCT_MAP[id],-.87+j*1.18+copy*.24,LEVEL_Y[l]+.05,.2));
-      const p=PRODUCT_MAP[id];const price=sign(promo,`${p.price.toLocaleString()}${p.promo?'  2+1':''}`,.66,.09,[-.6+j*1.18,LEVEL_Y[l]-.012,.551],'#f8f1d9','#425f50',37);productGroups.push(price);
-    }));
+    renderedPlacements=[];
+    for(const f of map.fixtures)for(const placement of getFixturePlacements(f,key)){
+      const p=PRODUCT_MAP[placement.productId],parent=fixtures.get(f.id);
+      const pkg=packageModel(parent,p,...placement.local,f.type==='fridge'?.82:.88);
+      pkg.rotation.y=placement.side===-1?Math.PI:0;pkg.userData.placement=placement;
+      productGroups.push(pkg);renderedPlacements.push(placement);
+      if(f.type==='promo')productGroups.push(sign(parent,p.price.toLocaleString(),.32,.08,[placement.local[0],LEVEL_Y[placement.level-1]-.015,.551],'#f8f1d9','#425f50',32));
+    }
   }
   applyLayout('hq');
 
@@ -302,6 +318,19 @@ export async function createStore(root, onAgentSelect) {
       group.rotation.y=f.rotation;group.scale.set(f.scale,1,1);
     }
     room.scale.set(map.width/14.5,1,map.depth/11.5);
+    const theme=map.theme,colors={'#bac8b9':theme.base,'#e8eae5':theme.wall,'#d7ddda':theme.wall,'#469fb5':theme.accent,'#aed873':theme.prop,'#d0d7bf':theme.shelf,'#d1d6c5':theme.shelf,'#659487':theme.accent,'#63897b':theme.accent,'#cad6ba':theme.shelf,'#70a78e':theme.accent,'#d0dbc6':theme.shelf,'#53796d':theme.accent,'#d3dac4':theme.shelf,'#bad778':theme.accent};
+    for(const group of [room,...fixtures.values()])group.traverse(mesh=>{
+      const original=mesh.userData.baseColor;
+      if(original==='#e1e1db')mesh.material.color.set(theme.floor);
+      else if(colors[original])mesh.material=material(colors[original]);
+    });
+    scene.background.set(theme.background);
+    for(const child of [...neighbourhood.children]){neighbourhood.remove(child);if(child.geometry!==cubeGeometry&&child.geometry!==cylinderGeometry)child.geometry?.dispose();}
+    for(const part of getMapDecor(map)){
+      if(part.shape==='cylinder')cylinder(neighbourhood,part.size[0],part.size[1],part.position,part.color);
+      else block(neighbourhood,part.size,part.position,part.color);
+    }
+    sign(neighbourhood,map.region,4.7,.32,[1.4,3.14,-map.depth/2+.28],theme.wall,theme.accent,33);
     entrance.position.set(map.entry[0],0,map.entry[1]-.15);
     const counter=map.fixtures.find(f=>f.id==='checkout');
     const clerk=localToWorld(counter,[.76,-.71]);
@@ -318,8 +347,9 @@ export async function createStore(root, onAgentSelect) {
     if(!nextWorld||!nextWorld.agents||!nextWorld.snapshot)throw new TypeError('A lab-owned spatial world is required.');
     if(nextWorld===world)return;
     for(const [id,actor] of actors)removeActor(id,actor);
+    if(ownerActor){store.remove(ownerActor.group,ownerActor.carrier);ownerActor.dispose();ownerActor=null;}
     if(nextWorld.mapId!==map.id)applyMap(nextWorld.mapId);
-    if(nextWorld.scenario!==scenarioKey)applyLayout(nextWorld.scenario);
+    applyLayout(nextWorld.scenario);
     world=nextWorld;lastWorldTime=world.time;selectedAgent=-1;uiElapsed=1;
   }
   function draw(t){
@@ -352,6 +382,9 @@ export async function createStore(root, onAgentSelect) {
       }
     }
     cashier.update(dt,{state:world.agents.some(a=>a.state==='paying')?'paying':'idle',basket:[],speed:0,velocity:0});
+    // Dedicated replenishment worker; the stationary cashier remains separate.
+    if(world.owner&&!ownerActor){ownerActor=createOwnerVisual(makeCharacter);store.add(ownerActor.group,ownerActor.carrier);}
+    const ownerDraw=ownerActor?syncOwnerVisual(ownerActor,world.owner,world.time,{runId:world.runId}):null;
     projectLabel(shelfLabel,new THREE.Vector3(promo.position.x,3.18,promo.position.z));
     const selected=world.agents.find(a=>a.id===selectedAgent);
     if(selected){
@@ -359,10 +392,10 @@ export async function createStore(root, onAgentSelect) {
       projectLabel(agentLabel,new THREE.Vector3(selected.position[0],2.0,selected.position[1]));
       document.getElementById('sceneAgentName').textContent=selected.profile.name+' · #'+String(selected.id+1).padStart(3,'0');
       document.getElementById('sceneAgentState').textContent=STATE_NAMES[selected.state]+(selected.station?' · '+world.stations[selected.station].name:'');
-      onAgentSelect(selected,world.snapshot());
-    }else {agentLabel.hidden=true;onAgentSelect(null,world.snapshot());}
+      onAgentSelect(selected,world.snapshot({detail:false}));
+    }else {agentLabel.hidden=true;onAgentSelect(null,world.snapshot({detail:false}));}
     if(uiElapsed>.25)uiElapsed=0;
-    renderer.render(scene,camera);renderedTime=world.time;renderedRunId=world.runId;
+    renderer.render(scene,camera);renderedTime=world.time;renderedRunId=world.runId;renderedOwner=ownerDraw;
     document.getElementById('loading').hidden=true;
   }
   function selectLevel(level){highlight.position.set(0,LEVEL_Y[level-1]+.26,0);document.getElementById('levelLabel').textContent=`${level}층 선택 · ${level===2||level===3?'눈높이 구간 가정':'위치 효과 비교'}`;}
@@ -374,8 +407,18 @@ export async function createStore(root, onAgentSelect) {
     selectAgent:id=>{selectedAgent=id;uiElapsed=1},
     nextAgent:()=>{const ids=(world?.agents??[]).map(a=>a.id);selectedAgent=ids[(ids.indexOf(selectedAgent)+1)%ids.length]??-1;uiElapsed=1;},
     followAgent:()=>{const a=world?.agents.find(a=>a.id===selectedAgent);if(a){controls.target.set(a.position[0],1,a.position[1]);camera.position.copy(controls.target).add(new THREE.Vector3(8,6,11));camera.zoom=2.2;camera.updateProjectionMatrix();}},
-    snapshot:()=>({...world?.snapshot(),renderedTime,renderedRunId,renderedAgents:[...actors].map(([id,a])=>({id,position:[a.group.position.x,a.group.position.z],...a.pose()})),renderedFixtures:[...fixtures].filter(([,g])=>g.visible).map(([id,g])=>({id,x:g.position.x,z:g.position.z,rotation:g.rotation.y,scale:g.scale.x})),selectedAgent,zoom:camera.zoom,rig:{bones:19,clips:8},paths:paths.visible,
-      screenAgents:[...actors].map(([id,a])=>{const p=a.group.position.clone().add(new THREE.Vector3(0,1,0)).project(camera);const rect=root.getBoundingClientRect();return{id,x:rect.left+(p.x*.5+.5)*rect.width,y:rect.top+(-p.y*.5+.5)*rect.height,...a.pose()};})}),
-    dispose:()=>{disposed=true;observer.disconnect();controls.dispose();actors.forEach(a=>a.dispose());cashier.dispose();envTarget.dispose();renderer.dispose();}
+    snapshot:({detail=true}={})=>({
+      ...world?.snapshot({detail}),renderedTime,renderedRunId,
+      renderedOwner:renderedOwner?{...renderedOwner,position:[...renderedOwner.position]}:null,
+      renderedAgents:[...actors].map(([id,a])=>({id,position:[a.group.position.x,a.group.position.z],...a.pose()})),
+      selectedAgent,zoom:camera.zoom,rig:{bones:19,clips:8},paths:paths.visible,
+      ...(detail?{
+        renderedPlacements:renderedPlacements.map(p=>({...p,position:[...p.position],visible:(world?.stock[p.productId]??0)>0})),
+        renderedTheme:{...map.theme},renderedProps:map.props.map(p=>({...p})),
+        renderedFixtures:[...fixtures].filter(([,g])=>g.visible).map(([id,g])=>({id,x:g.position.x,z:g.position.z,rotation:g.rotation.y,scale:g.scale.x})),
+        screenAgents:[...actors].map(([id,a])=>{const p=a.group.position.clone().add(new THREE.Vector3(0,1,0)).project(camera);const rect=root.getBoundingClientRect();return{id,x:rect.left+(p.x*.5+.5)*rect.width,y:rect.top+(-p.y*.5+.5)*rect.height,...a.pose()};}),
+      }:{}),
+    }),
+    dispose:()=>{disposed=true;observer.disconnect();controls.dispose();actors.forEach(a=>a.dispose());cashier.dispose();ownerActor?.dispose();envTarget.dispose();renderer.dispose();}
   };
 }

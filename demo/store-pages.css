@@ -1,0 +1,286 @@
+/* Four stores per page, four concurrent proposals per store.
+   Keep every ancestor below the shared fixed WebGL canvas (z-index: 2).
+   Only the individual, opaque card chrome may sit above that canvas. */
+.store-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex: none;
+  gap: 10px;
+  height: 31px;
+  color: #a8a3b1;
+  font-size: 9px;
+}
+.store-pagination > button {
+  display: grid;
+  place-items: center;
+  width: 25px;
+  height: 22px;
+  padding: 0;
+  border: 1px solid #434049;
+  border-radius: 5px;
+  background: #28262e;
+  color: #d8d3df;
+  font-size: 15px;
+  line-height: 1;
+}
+.store-pagination > button:disabled { opacity: .3; }
+#storePageLabel { min-width: 108px; text-align: center; font-variant-numeric: tabular-nums; }
+#storePageDots { display: flex; align-items: center; gap: 5px; }
+#storePageDots button {
+  width: 6px;
+  height: 6px;
+  padding: 0;
+  border: 0;
+  border-radius: 99px;
+  font-size: 0;
+  line-height: 0;
+  overflow: hidden;
+  background: #4d4858;
+  transition: width .18s, background .18s;
+}
+#storePageDots button.active,
+#storePageDots button[aria-current="page"],
+#storePageDots button[aria-selected="true"] { width: 18px; background: #7be3cf; }
+#mobileStoreTabs { display: none; }
+
+#comparisonRows.store-pages {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  gap: 16px;
+  padding: 0 0 3px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  scroll-snap-type: x mandatory;
+  scroll-padding: 0;
+  overscroll-behavior-x: contain;
+  scrollbar-width: none;
+  -webkit-overflow-scrolling: touch;
+}
+#comparisonRows.store-pages::-webkit-scrollbar { display: none; }
+.store-pages > .store-page {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  gap: 12px 16px;
+  flex: 0 0 100%;
+  min-width: 0;
+  min-height: 0;
+  scroll-snap-align: start;
+  scroll-snap-stop: always;
+}
+.store-pages .store-row,
+.store-pages .store-row:not(.mobile-active) {
+  display: flex;
+  flex-direction: column;
+  min-width: 0;
+  min-height: 0;
+  gap: 0;
+  padding: 0 7px 7px;
+  border: 1px solid #35323c;
+  border-radius: 9px;
+  background: #1e1d24;
+}
+.store-pages .store-row-heading {
+  height: 27px;
+  min-height: 27px;
+  gap: 6px;
+  padding: 0 1px;
+}
+.store-pages .store-row-heading > div { min-width: 0; gap: 6px; }
+.store-pages .store-row-heading h3 { font-size: 10px; overflow: hidden; text-overflow: ellipsis; }
+.store-pages .store-row-heading small { color: #8e8899; font-size: 7px; white-space: nowrap; }
+.store-pages .store-row-heading > span { font-size: 6px; color: #827b8e; }
+.store-pages .store-number { color: #948aab; font-size: 8px; }
+.store-pages .candidate-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  grid-template-rows: repeat(2, minmax(0, 1fr));
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  gap: 6px;
+}
+.store-pages .candidate-card.course-card {
+  --card-padding: 7px;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-rows: 25px minmax(36px, 1fr) 20px 17px 24px;
+  gap: 0;
+  min-width: 0;
+  min-height: 0;
+  padding: 0;
+  border-radius: 8px;
+  box-shadow: none;
+}
+.course-card[data-scenario="discovery"] { --card-color: #b49aff; --card-tint: #312747; }
+.store-pages .course-card-heading {
+  grid-column: 1 / -1;
+  grid-row: 1;
+  order: 0;
+  height: auto;
+  min-height: 0;
+  padding: 4px 39px 4px var(--card-padding);
+  text-align: left;
+}
+.store-pages .course-card .card-title {
+  justify-content: flex-start;
+  gap: 5px;
+  height: 16px;
+  min-height: 0;
+  padding: 0;
+}
+.store-pages .course-card .card-title strong { font-size: 10px; line-height: 16px; overflow: hidden; text-overflow: ellipsis; }
+.store-pages .course-card .candidate-letter { width: 16px; height: 16px; font-size: 8px; }
+.store-pages .course-card-header {
+  grid-column: 2;
+  grid-row: 1;
+  order: 1;
+  align-self: center;
+  justify-self: end;
+  height: auto;
+  min-height: 0;
+  padding: 0 var(--card-padding) 0 0;
+  gap: 0;
+  background: transparent;
+}
+.store-pages .course-card .card-status { margin: 0; font-size: 6px; line-height: 16px; }
+.store-pages .course-card-date,
+.store-pages .course-card-more,
+.store-pages .course-card-heading p,
+.store-pages .course-card .card-funnel,
+.store-pages .course-card .card-inventory,
+.store-pages .course-card .card-secondary { display: none; }
+.store-pages .course-card .card-viewport {
+  grid-column: 1 / -1;
+  grid-row: 2;
+  width: calc(100% - var(--card-padding) * 2);
+  height: auto;
+  min-height: 0;
+  margin: 0 var(--card-padding);
+  flex: none;
+}
+.store-pages .course-card .card-view-hint { left: 4px; right: 4px; bottom: 3px; }
+.store-pages .course-card .card-view-hint > span { font-size: 5px; padding: 2px 3px; }
+.store-pages .course-card .card-view-hint > span:last-child { font-size: 5px; }
+.store-pages .course-card > .card-metrics {
+  grid-column: 1 / -1;
+  grid-row: 3;
+  height: auto;
+  min-height: 0;
+  padding: 3px var(--card-padding) 2px;
+  gap: 6px;
+}
+.store-pages .course-card > .card-metrics > div { gap: 4px; }
+.store-pages .course-card > .card-metrics span { font-size: 6px; }
+.store-pages .course-card > .card-metrics > div:first-child > span { font-size: 0; }
+.store-pages .course-card > .card-metrics > div:first-child > span::after { content: "결제매출"; font-size: 6px; }
+.store-pages .course-card > .card-metrics b { font-size: 11px; letter-spacing: -.35px; }
+.store-pages .course-card > .card-metrics .profit b { font-size: 10px; }
+.store-pages .course-card-progress {
+  grid-column: 1 / -1;
+  grid-row: 4;
+  height: auto;
+  min-height: 0;
+  padding: 1px var(--card-padding) 4px;
+}
+.store-pages .course-progress-heading { font-size: 6px; line-height: 6px; margin-bottom: 3px; }
+.store-pages .course-card .candidate-progress { height: 2px; min-height: 2px; margin: 0; }
+.store-pages .course-card-footer {
+  grid-column: 1 / -1;
+  grid-row: 5;
+  height: auto;
+  min-height: 0;
+  padding: 3px var(--card-padding);
+  gap: 3px;
+}
+.store-pages .course-avatar { height: 16px; width: 16px; border-width: 1px; }
+.store-pages .course-avatar.worker { margin-left: -5px; }
+.store-pages .course-avatar svg { width: 13px; height: 13px; margin-top: 2px; }
+.store-pages .course-card-add { display: none; }
+.store-pages .course-participants [data-active] { margin-left: 4px; font-size: 6px; }
+.store-pages .course-countdown { padding: 3px 5px; gap: 3px; }
+.store-pages .course-countdown time { font-size: 8px; }
+.store-pages .course-countdown small { font-size: 5px; }
+
+@media (min-width: 701px) {
+  .app-shell { min-height: 620px; }
+  .comparison-board { padding-left: 10px; padding-right: 10px; }
+  .store-pagination { height: 28px; }
+  .store-pages .store-row { overflow: hidden; }
+  /* 67px of chrome leaves a real 3D viewport even in short desktop windows.
+     Do not let fixed chrome plus a minimum scene force hidden footer overflow. */
+  .store-pages .candidate-card.course-card { grid-template-rows: 20px minmax(0, 1fr) 17px 12px 18px; }
+  .store-pages .course-card-heading { padding-top: 2px; padding-bottom: 2px; }
+  .store-pages .course-card > .card-metrics { padding-top: 2px; padding-bottom: 1px; }
+  .store-pages .course-card-progress { padding-top: 1px; padding-bottom: 2px; }
+  .store-pages .course-progress-heading { margin-bottom: 1px; }
+  .store-pages .course-card-footer { padding-top: 1px; padding-bottom: 1px; }
+  .store-pages .course-avatar { height: 14px; width: 14px; }
+  .store-pages .course-avatar svg { width: 11px; height: 11px; }
+  .store-pages .course-countdown { padding-top: 1px; padding-bottom: 1px; }
+}
+@media (min-width: 701px) and (max-width: 1100px) {
+  .store-pages > .store-page { gap: 10px; }
+  .store-pages .store-row { padding: 0 5px 5px; border-radius: 7px; }
+  .store-pages .store-row-heading { height: 26px; min-height: 26px; }
+  .store-pages .store-row-heading h3 { font-size: 9px; }
+  .store-pages .store-row-heading small { font-size: 6px; }
+  .store-pages .store-row-heading > span { display: none; }
+  .store-pages .candidate-grid { gap: 5px; }
+  .store-pages .candidate-card.course-card { --card-padding: 5px; }
+  .store-pages .course-card .card-title { gap: 4px; }
+  .store-pages .course-card .card-title strong { font-size: 9px; }
+  .store-pages .course-card > .card-metrics b { font-size: 10px; }
+  .store-pages .course-card > .card-metrics .profit b { font-size: 9px; }
+  .store-pages .course-card > .card-metrics .profit > span { display: none; }
+  .store-pages .course-participants [data-active] { font-size: 5px; }
+  .store-pages .course-countdown time { font-size: 7px; }
+}
+@media (min-width: 701px) and (max-height: 900px) {
+  .app-shell { grid-template-rows: 45px 68px minmax(0, 1fr) 23px; }
+  .topbar { height: 45px; }
+  .statusbar { height: 23px; }
+  .experiment-bar { padding-top: 5px; padding-bottom: 7px; }
+  .experiment-title h1 { font-size: 20px; margin: 4px 0; }
+  .comparison-board > .panel-heading { height: 25px; }
+  .store-pagination { height: 25px; }
+  .store-pages .store-row-heading { height: 23px; min-height: 23px; }
+}
+@media (max-width: 700px) {
+  .comparison-board { overflow: hidden; }
+  .store-pagination { height: 38px; gap: 10px; font-size: 9px; }
+  .store-pagination > button { width: 30px; height: 27px; }
+  #comparisonRows.store-pages { min-height: 0; flex: none; align-items: flex-start; padding-bottom: 4px; }
+  .store-pages > .store-page { grid-template-columns: minmax(0, 1fr); grid-template-rows: none; grid-auto-rows: auto; gap: 12px; }
+  .store-pages .store-row { padding: 0 7px 7px; }
+  .store-pages .store-row-heading { height: 33px; min-height: 33px; }
+  .store-pages .store-row-heading h3 { font-size: 11px; }
+  .store-pages .store-row-heading small { font-size: 7px; }
+  .store-pages .store-row-heading > span { font-size: 6px; }
+  .store-pages .candidate-grid { gap: 7px; }
+  .store-pages .candidate-card.course-card {
+    --card-padding: 6px;
+    min-height: 207px;
+    grid-template-rows: 28px minmax(104px, 1fr) 23px 23px 27px;
+    border-radius: 9px;
+  }
+  .store-pages .course-card-heading { padding-top: 6px; padding-bottom: 6px; }
+  .store-pages .course-card .card-title strong { font-size: 10px; }
+  .store-pages .course-card .card-status { font-size: 6px; }
+  .store-pages .course-card > .card-metrics { padding-top: 4px; padding-bottom: 3px; }
+  .store-pages .course-card > .card-metrics b { font-size: 11px; }
+  .store-pages .course-card > .card-metrics .profit b { font-size: 9px; }
+  .store-pages .course-card > .card-metrics .profit > span { display: none; }
+  .store-pages .course-card-progress { padding-top: 3px; padding-bottom: 5px; }
+  .store-pages .course-progress-heading { font-size: 7px; line-height: 7px; margin-bottom: 5px; }
+  .store-pages .course-card-footer { padding-top: 4px; padding-bottom: 4px; }
+  .store-pages .course-countdown time { font-size: 7px; }
+  .store-pages .course-participants [data-active] { font-size: 5px; }
+  .store-pages .course-card .card-view-hint > span { font-size: 5px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  #storePageDots button { transition: none; }
+}

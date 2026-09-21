@@ -1,0 +1,166 @@
+/* Supplied course-card structure and palette, scoped to the live simulation cards.
+   The shared WebGL canvas is at z-index:2. Only opaque card chrome sits above it;
+   never give the whole card a transform/isolation/stacking context. */
+:root {
+  --clr-blue: #1890ff;
+  --clr-green: #01c3a8;
+  --clr-orange: #ffb741;
+  --clr-red: #a63d2a;
+  --bg-dark: #232228;
+  --bg-footer: #151419;
+}
+
+.comparison-board { border-color: #333138; background: #1b1a20; }
+.comparison-rows { gap: 9px; }
+.candidate-grid { gap: 12px; }
+.candidate-card.course-card {
+  --card-color: var(--clr-green);
+  --card-tint: #173934;
+  --card-padding: 12px;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
+  border: 1px solid #414047;
+  border-radius: 14px;
+  background: var(--bg-dark);
+  color: #f5f4f7;
+  box-shadow: 0 4px 12px #00000014;
+  overflow: hidden;
+  transition: border-color .18s, box-shadow .18s;
+}
+.course-card[data-scenario="owner"] { --card-color: var(--clr-orange); --card-tint: #3c3020; }
+.course-card[data-scenario="balanced"] { --card-color: var(--clr-blue); --card-tint: #1b2d43; }
+.candidate-card.course-card.selected {
+  border-color: var(--card-color);
+  background: var(--bg-dark);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--card-color) 24%, transparent), 0 5px 18px #0002;
+}
+.candidate-card.course-card:hover {
+  filter: none;
+  border-color: var(--card-color);
+  box-shadow: 0 0 0 1px color-mix(in srgb, var(--card-color) 20%, transparent);
+}
+.candidate-card.course-card:focus-visible { outline: 2px solid var(--card-color); outline-offset: 3px; }
+.course-card-header,
+.course-card-heading,
+.course-card .card-metrics,
+.course-card .card-funnel,
+.course-card .card-inventory,
+.course-card .card-secondary,
+.course-card-progress,
+.course-card-footer { position: relative; z-index: 3; flex: none; background: var(--bg-dark); }
+
+.course-card-header { display: flex; align-items: center; gap: 6px; height: 23px; padding: 5px var(--card-padding) 0; }
+.course-card-date { color: #adabb6; font-size: 7px; font-weight: 400; letter-spacing: .3px; }
+.course-card-date i { font-style: normal; color: #66646e; margin: 0 3px; }
+.course-card .card-status { margin-left: auto; padding: 0; background: none; border-radius: 0; color: #b4b0bd; font-size: 7px; }
+.course-card .card-status.running,.course-card .card-status.complete { color: var(--card-color); background: none; }
+.course-card .card-status.failed { color: #ffaf9d; }
+.course-card-more { display: inline-flex; color: #c9c6d0; margin-right: -5px; }
+.course-card-more svg { width: 16px; height: 16px; }
+.course-card-heading { text-align: center; height: 35px; padding: 3px var(--card-padding) 5px; }
+.course-card .card-title { display: flex; justify-content: center; align-items: center; gap: 6px; padding: 0; margin: 0; min-height: 0; height: 17px; background: none; }
+.course-card .candidate-letter { width: 17px; height: 17px; border-radius: 50%; border: 1px solid var(--card-color); background: var(--card-tint); color: var(--card-color); font: 9px var(--mono); }
+.course-card.selected .candidate-letter { background: var(--card-color); color: #16151a; }
+.course-card .card-title strong { color: #f2f0f7; font-size: 12px; font-weight: 600; letter-spacing: -.3px; }
+.course-card-heading p { margin-top: 3px; color: #a6a2af; font-size: 7px; line-height: 1; }
+
+.course-card .card-viewport { width: calc(100% - var(--card-padding) * 2); margin: 0 var(--card-padding); flex: 1; min-height: 54px; background: #dde5e5; border-radius: 0; }
+.course-card .card-view-hint { left: 5px; right: 5px; bottom: 4px; font-size: 5px; letter-spacing: .5px; }
+.course-card .card-view-hint > span { padding: 2px 4px; border: 0; border-radius: 3px; background: #f5f7f0d9; font-size: 5px; }
+.course-card .card-view-hint > span:first-child::before { width: 3px; height: 3px; margin-right: 3px; }
+.course-card .card-view-hint > span:last-child { font-size: 6px; }
+
+.course-card > .card-metrics { display: flex; flex-direction: row; align-items: center; justify-content: space-between; gap: 8px; height: 25px; min-height: 25px; padding: 5px var(--card-padding) 2px; }
+.course-card > .card-metrics > div { display: flex; flex-direction: row; align-items: baseline; gap: 5px; min-width: 0; }
+.course-card > .card-metrics span { color: #aaa6b5; font-size: 6px; white-space: nowrap; }
+.course-card > .card-metrics b { color: #f5f4f7; font: 12px var(--mono); letter-spacing: -.4px; }
+.course-card > .card-metrics .profit b { color: var(--card-color); font-size: 11px; }
+.course-card .card-funnel { height: 14px; min-height: 14px; padding: 0 var(--card-padding); border: 0; color: #aaa6b5; font-size: 7px; gap: 4px; }
+.course-card .card-funnel b { color: #eeedf1; font-size: 8px; font-weight: 400; }
+.course-card .card-inventory { height: 12px; min-height: 12px; padding: 0 var(--card-padding); color: #9692a0; font-size: 6px; gap: 3px; }
+.course-card .card-inventory [data-owner] { color: #b5b1bf; }
+.course-card .card-inventory [data-owner].working { color: var(--card-color); }
+.course-card .card-secondary { height: 12px; min-height: 12px; padding: 0 var(--card-padding); color: #9692a0; font-size: 6px; }
+.course-card .card-secondary b { color: #c2bdcb; font-size: 6px; }
+.course-card .card-secondary b.warning { color: #ffbb96; }
+
+.course-card-progress { padding: 4px var(--card-padding) 7px; height: 26px; }
+.course-progress-heading { display: flex; justify-content: space-between; margin-bottom: 5px; color: #d2ceda; font-size: 7px; line-height: 7px; }
+.course-progress-heading [data-completed] { font-family: var(--mono); color: var(--card-color); }
+.course-card .candidate-progress { margin: 0; height: 3px; min-height: 3px; width: 100%; border-radius: 4px; background: #3c3944; }
+.course-card .candidate-progress i { height: 100%; background: var(--card-color); border-radius: inherit; }
+.course-card-footer { display: flex; align-items: center; justify-content: space-between; gap: 5px; height: 33px; min-height: 33px; margin-top: 0; padding: 5px var(--card-padding); border-top: 1px solid #343039; background: var(--bg-footer); }
+.course-participants { display: flex; align-items: center; min-width: 0; }
+.course-avatar { display: inline-flex; justify-content: center; align-items: center; height: 21px; width: 21px; flex: none; border: 2px solid var(--bg-footer); border-radius: 50%; overflow: hidden; background: #e7bea3; color: #5c3b39; }
+.course-avatar.worker { margin-left: -6px; background: #bce9e5; color: #326d6d; }
+.course-avatar svg { width: 17px; height: 17px; margin-top: 3px; }
+.course-card-add { display: grid; place-items: center; width: 18px; height: 18px; margin-left: 4px; border-radius: 50%; background: var(--card-color); color: #18171d; font-size: 15px; line-height: 1; }
+.course-participants [data-active] { margin-left: 5px; color: #a29cad; font-size: 6px; white-space: nowrap; }
+.course-countdown { display: flex; align-items: baseline; gap: 4px; border-radius: 20px; padding: 5px 8px; background: var(--card-tint); color: var(--card-color); white-space: nowrap; }
+.course-countdown time { font: 8px var(--mono); font-weight: 500; }
+.course-countdown small { font-size: 6px; color: var(--card-color); }
+
+/* Keep the nine-world overview at desktop sizes; short windows can scroll the
+   board instead of cropping a viewport or shrinking a character to zero. */
+@media (min-width: 701px) {
+  .comparison-rows { grid-template-rows: repeat(3,minmax(260px,1fr)); overflow-y: auto; scrollbar-width: thin; scrollbar-color: #4b4754 transparent; padding: 0 3px 3px; }
+  .store-row-heading { height: 22px; }
+}
+@media (min-width: 701px) and (max-width: 1100px) {
+  .candidate-grid { gap: 8px; }
+  .candidate-card.course-card { --card-padding: 9px; border-radius: 12px; }
+  .course-card-header { height: 20px; padding-top: 3px; }
+  .course-card-heading { height: 30px; padding-top: 1px; padding-bottom: 3px; }
+  .course-card .card-title strong { font-size: 10px; }
+  .course-card-heading p { font-size: 6px; }
+  .course-card > .card-metrics { height: 22px; min-height: 22px; padding-top: 4px; gap: 4px; }
+  .course-card > .card-metrics > div { gap: 3px; }
+  .course-card > .card-metrics span { font-size: 5px; }
+  .course-card > .card-metrics b { font-size: 10px; }
+  .course-card > .card-metrics .profit b { font-size: 9px; }
+  .course-card .card-funnel { height: 12px; min-height: 12px; font-size: 6px; }
+  .course-card .card-funnel b { font-size: 7px; }
+  .course-card .card-inventory,.course-card .card-secondary { height: 10px; min-height: 10px; font-size: 6px; }
+  .course-card-progress { height: 23px; padding-top: 4px; padding-bottom: 4px; }
+  .course-card-footer { height: 29px; min-height: 29px; padding-top: 3px; padding-bottom: 3px; }
+  .comparison-rows { grid-template-rows: repeat(3,minmax(240px,1fr)); }
+}
+@media (max-width: 700px) {
+  .comparison-rows { overflow: visible; }
+  .candidate-grid { gap: 18px; }
+  .candidate-card.course-card { --card-padding: 18px; border-radius: 20px; }
+  .course-card-header { height: 39px; padding-top: 12px; }
+  .course-card-date { font-size: 10px; }
+  .course-card .card-status { font-size: 10px; }
+  .course-card-more svg { width: 20px; height: 20px; }
+  .course-card-heading { height: 60px; padding-top: 6px; padding-bottom: 12px; }
+  .course-card .card-title { height: 23px; gap: 9px; }
+  .course-card .card-title strong { font-size: 18px; }
+  .course-card .candidate-letter { width: 23px; height: 23px; font-size: 12px; }
+  .course-card-heading p { margin-top: 7px; font-size: 10px; }
+  .course-card .card-viewport { height: 180px; min-height: 180px; flex: none; }
+  .course-card .card-view-hint { left: 8px; right: 8px; bottom: 8px; }
+  .course-card .card-view-hint > span { font-size: 7px; padding: 4px 5px; }
+  .course-card .card-view-hint > span:last-child { font-size: 8px; }
+  .course-card > .card-metrics { height: 45px; min-height: 45px; padding-top: 12px; padding-bottom: 5px; }
+  .course-card > .card-metrics > div { gap: 5px; }
+  .course-card > .card-metrics span { font-size: 7px; }
+  .course-card > .card-metrics b { font-size: 15px; }
+  .course-card > .card-metrics .profit b { font-size: 13px; }
+  .course-card .card-funnel { height: 24px; min-height: 24px; font-size: 9px; }
+  .course-card .card-funnel b { font-size: 10px; }
+  .course-card .card-inventory,.course-card .card-secondary { height: 20px; min-height: 20px; font-size: 8px; }
+  .course-card .card-secondary b { font-size: 8px; }
+  .course-card-progress { height: 40px; padding-top: 7px; padding-bottom: 13px; }
+  .course-progress-heading { font-size: 10px; line-height: 10px; margin-bottom: 8px; }
+  .course-card .candidate-progress { height: 4px; min-height: 4px; }
+  .course-card-footer { height: 55px; min-height: 55px; padding-top: 10px; padding-bottom: 10px; }
+  .course-avatar { width: 29px; height: 29px; }
+  .course-avatar svg { width: 23px; height: 23px; }
+  .course-card-add { width: 24px; height: 24px; margin-left: 6px; font-size: 20px; }
+  .course-participants [data-active] { font-size: 8px; margin-left: 7px; }
+  .course-countdown { padding: 8px 10px; }
+  .course-countdown time { font-size: 10px; }
+  .course-countdown small { font-size: 8px; }
+}
