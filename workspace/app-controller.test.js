@@ -11,6 +11,7 @@ import * as data from './data.js';
 import * as workflow from './state.js';
 import * as operations from './operations.js';
 import { simulateComparison } from './forecast.js';
+import { buildProposalHistory } from './proposal-history.js';
 
 const originalController = await readFile(new URL('./app.js', import.meta.url), 'utf8');
 const controllerSource = originalController
@@ -78,7 +79,7 @@ function createHarness({ failWorldImport = false, personaLoad, calculationJob, w
     body: { append(node) { calls.toasts.push(node.textContent); } },
   };
   const context = vm.createContext({
-    ...data, ...workflow, ...operations,
+    ...data, ...workflow, ...operations, buildProposalHistory,
     document, location, AbortController,
     window: { scrollTo() {}, addEventListener(name, handler) { windowListeners.set(name, handler); } },
     history: { scrollRestoration:'auto',pushState(_state, _title, hash) { calls.pushStates.push(hash);location.hash = hash; },replaceState(_state,_title,hash){calls.replaceStates.push(hash);location.hash=hash;} },
@@ -186,6 +187,7 @@ function createHarness({ failWorldImport = false, personaLoad, calculationJob, w
     photos: JSON.parse(JSON.stringify(lastView.state.photos)),
     resultCount: Object.keys(lastView.results).length,
     operations: JSON.parse(JSON.stringify(lastView.operations)),
+    proposalHistory: JSON.parse(JSON.stringify(lastView.proposalHistory)),
     opsRange: lastView.opsRange, opsFilter: lastView.opsFilter, selectedStoreId: lastView.selectedStoreId,
     observationOpen: lastView.observationOpen, observationDraft: JSON.parse(JSON.stringify(lastView.observationDraft)),
     observationPhoto: lastView.observationPhoto ? { ...lastView.observationPhoto } : null,
@@ -388,6 +390,76 @@ test('unsupported range is reported without corrupting the prior valid selection
   await harness.click('ops-range', { value: '1000' });
   assert.equal(harness.snapshot().opsRange, 14);
   assert.match(harness.snapshot().error, /지원하지 않는 조회 기간/);
+});
+
+test('proposal history period and attention filters change records and intersect without altering totals', async () => {
+  const h = createHarness();
+  await h.click('login');
+  await h.click('navigate', { route: 'review' });
+  const initial = h.snapshot().proposalHistory;
+  assert.deepEqual(initial.filters, { period: 'all', status: 'all' });
+  assert.equal(initial.records.length, 4);
+  assert.equal(initial.records.filter(record => record.elapsedDays === 14).length, 2);
+  assert.equal(initial.records.filter(record => record.elapsedDays === 28).length, 2);
+
+  await h.click('history-period', { value: '14' });
+  assert.equal(h.snapshot().proposalHistory.records.length, 2);
+  assert.ok(h.snapshot().proposalHistory.records.every(record => record.elapsedDays === 14));
+  await h.click('history-period', { value: '28' });
+  assert.equal(h.snapshot().proposalHistory.records.length, 2);
+  assert.ok(h.snapshot().proposalHistory.records.every(record => record.elapsedDays === 28));
+  await h.click('history-status', { value: 'attention' });
+  assert.deepEqual(h.snapshot().proposalHistory.records, []);
+  await h.click('history-period', { value: 'all' });
+  const attention = h.snapshot().proposalHistory;
+  assert.deepEqual(attention.filters, { period: 'all', status: 'attention' });
+  assert.equal(attention.records.length, 1);
+  assert.equal(attention.records[0].status, 'attention');
+  assert.deepEqual(attention.summary, initial.summary);
+  await h.click('history-status', { value: 'all' });
+  assert.deepEqual(h.snapshot().proposalHistory.records, initial.records);
+});
+
+test('invalid proposal history filters preserve the last valid period, status and records', async () => {
+  const h = createHarness();
+  await h.click('login');
+  await h.click('navigate', { route: 'review' });
+  await h.click('history-period', { value: '14' });
+  await h.click('history-status', { value: 'attention' });
+  const prior = h.snapshot().proposalHistory;
+  await h.click('history-period', { value: '7' });
+  assert.match(h.snapshot().error, /지원하지 않는 경과 기간/);
+  assert.deepEqual(h.snapshot().proposalHistory, prior);
+  await h.click('history-status', { value: 'completed' });
+  assert.match(h.snapshot().error, /지원하지 않는 추적 상태/);
+  assert.deepEqual(h.snapshot().proposalHistory, prior);
+});
+
+test('proposal history filters retain scroll and expanded details, and reset restores both filters', async () => {
+  const h = createHarness();
+  h.controls.detailBlueprint = [{ key: 'history-session' }];
+  await h.click('login');
+  await h.click('navigate', { route: 'review' });
+  h.scroll(740);
+  h.detail('history-session', true);
+  const pushed = h.calls.pushStates.length;
+  await h.click('history-period', { value: '14' });
+  assert.equal(h.snapshot().scrollTop, 740);
+  assert.deepEqual(h.snapshot().expandedDetails, ['history-session']);
+  await h.click('history-status', { value: 'attention' });
+  assert.equal(h.snapshot().scrollTop, 740);
+  assert.deepEqual(h.snapshot().expandedDetails, ['history-session']);
+  assert.equal(h.calls.pushStates.length, pushed);
+  assert.equal(h.snapshot().route, 'review');
+  assert.ok(h.calls.scrolls.every(call => call.behavior === 'instant'));
+  await h.click('reset-demo');
+  assert.equal(h.snapshot().route, 'login');
+  assert.deepEqual(h.snapshot().proposalHistory.filters, { period: 'all', status: 'all' });
+  assert.equal(h.snapshot().proposalHistory.records.length, 4);
+  await h.click('login');
+  await h.click('navigate', { route: 'review' });
+  assert.equal(h.snapshot().scrollTop, 0);
+  assert.deepEqual(h.snapshot().expandedDetails, []);
 });
 
 test('manual observation form changes recommendations and direct counts without changing synthetic sales', async () => {

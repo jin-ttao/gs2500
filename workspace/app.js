@@ -1,14 +1,16 @@
-import {STORES,BAYS,PRODUCTS,RETROSPECTIVE_CASES,getStore,getBay,getCandidate,getInventory,getPlacements} from './data.js';
+import {STORES,BAYS,PRODUCTS,getStore,getBay,getCandidate,getInventory,getPlacements} from './data.js';
 import {calculateComparisons} from './forecast-job.js';
 import {createWorkflowState,approveProposal,getOwnerProposal,respondToProposal,acceptPhoto,reviewSummary,validatePhoto} from './state.js';
 import {renderApp} from './views.js';
 import {createOperationsState,recordOperation,buildOperationsView} from './operations.js';
+import {buildProposalHistory} from './proposal-history.js';
 
 const app=document.querySelector('#app');
 let state=createWorkflowState(),route='login',selectedStoreId=STORES[0].id,selectedBayId=STORES[0].bayId,selectedCandidateId='A';
 let results={},error='',busy=false,approvalOpen=false,messageDraft='',generation=0,cleanup=()=>{},controller=null,elapsed=0,calculationToken=0,sessionToken=0,photoToken=0;
 let operationsState=createOperationsState(),opsRange=14,opsFilter='all',observationOpen=false,observationDraft={},observationPhoto=null,observationToken=0,searchOpen=false;
 let sidebarCollapsed=false,mobileSidebarOpen=false;
+let historyPeriod='all',historyStatus='all';
 let calculationController=null,calculationProgress={completed:0,total:BAYS.length};
 // Presentation memory is separate from simulation/economic state. Re-rendering
 // a filter, opening a dialog, or returning from a detail must not lose place.
@@ -143,10 +145,9 @@ function navigate(next,{storeId=selectedStoreId,bayId,candidateId=selectedCandid
 }
 function reviewData(){
   const summary=reviewSummary(state,BAYS);
-  return {...summary,cases:RETROSPECTIVE_CASES,rows:summary.rows.map(row=>({
+  return {...summary,rows:summary.rows.map(row=>({
     ...row,store:getStore(row.storeId),bay:getBay(row.storeId,row.bayId),approval:state.approvals[row.storeId]??null,
     response:state.responses[row.storeId]?{...state.responses[row.storeId],photoName:state.photos[row.storeId]?.fileName,photoUrl:state.photos[row.storeId]?.photoUrl}:null,photo:state.photos[row.storeId]??null,
-    observation:(()=>{const c=RETROSPECTIVE_CASES.find(item=>item.storeId===row.storeId);return c?{...c,beforeYoy:c.yoyBefore,afterYoy:c.yoyAfter,reason:c.explanation}:null;})(),
   }))};
 }
 function render({resetScroll=false,viewState=null,navigation=false}={}){
@@ -165,6 +166,7 @@ function render({resetScroll=false,viewState=null,navigation=false}={}){
     approval:route==='owner'?owner:state.approvals[store.id]??null,
     response:state.responses[store.id]?{...state.responses[store.id],note:ownerNoteDrafts.get(store.id)??state.responses[store.id].note,photoName:photo?.fileName,photoUrl:photo?.photoUrl}:ownerNoteDrafts.has(store.id)?{note:ownerNoteDrafts.get(store.id)}:null,
     photo,review:reviewData(),inventory:getInventory(store.id),placements:getPlacements(store.id,candidate.scenario),baselinePlacements:getPlacements(store.id,'hq'),
+    proposalHistory:buildProposalHistory({period:historyPeriod,status:historyStatus}),
     approvalOpen,messageDraft,error,busy,loggedIn:state.loggedIn,selectedStoreId,elapsed,calculationProgress,
     operations:buildOperationsView(operationsState,store.id,{range:opsRange,filter:route==='operations'?opsFilter:'all'}),
     opsRange,opsFilter,observationOpen,observationDraft,observationPhoto,searchOpen,sidebarCollapsed,mobileSidebarOpen,
@@ -268,6 +270,14 @@ app.addEventListener('click',async event=>{
     else if(action==='ops-store')navigate(['home','operations','recommendations','evidence'].includes(route)?route:'home',{storeId:button.dataset.store,candidateId:'A'});
     else if(action==='ops-range'){const value=Number(button.dataset.value);if(![7,14,28].includes(value))throw Error('지원하지 않는 조회 기간입니다.');opsRange=value;render();}
     else if(action==='ops-filter'){opsFilter=button.dataset.value;render();}
+    else if(action==='history-period'){
+      const value=button.dataset.value;if(!['all','14','28'].includes(value))throw Error('지원하지 않는 경과 기간입니다.');
+      historyPeriod=value;render();
+    }
+    else if(action==='history-status'){
+      const value=button.dataset.value;if(!['all','attention'].includes(value))throw Error('지원하지 않는 추적 상태입니다.');
+      historyStatus=value;render();
+    }
     else if(action==='open-observation'){
       overlayRevision++;
       closeObservation();observationOpen=true;searchOpen=false;mobileSidebarOpen=false;
@@ -307,6 +317,7 @@ app.addEventListener('click',async event=>{
       for(const photo of Object.values(state.photos))URL.revokeObjectURL(photo.photoUrl);
       for(const row of operationsState.records)if(row.photo?.reference?.startsWith('blob:'))URL.revokeObjectURL(row.photo.reference);
       closeObservation();operationsState=createOperationsState();opsRange=14;opsFilter='all';searchOpen=false;sidebarCollapsed=false;mobileSidebarOpen=false;
+      historyPeriod='all';historyStatus='all';
       state=createWorkflowState();results={};messageDraft='';elapsed=0;
       pageMemory.clear();ownerNoteDrafts.clear();renderedPageKey=null;renderedRoute=null;renderedOverlay=null;overlayReturnFocus=null;pendingRestore=null;overlayRevision=0;renderedOverlayRevision=-1;
       // A failed optional 3D import must not prevent resetting the core workflow.

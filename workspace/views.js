@@ -1,6 +1,7 @@
 // Presentation-only views. All forecasts, identities and approval state come
 // from the shared workflow contract; this module never generates performance.
 import {icon} from './ui.js';
+import {renderProposalHistory} from './proposal-history-view.js';
 import {renderOperationsOverview,renderOperationsHistory,renderRecommendations,renderEvidence,renderObservationDialog,renderSearchDialog} from './operations-view.js';
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const number = value => value != null && Number.isFinite(Number(value)) ? Number(value).toLocaleString('ko-KR', {maximumFractionDigits: 1}) : '—';
@@ -49,7 +50,7 @@ function shell(vm, content) {
       <div class="ob-sidebar-header">${button('<span class="ob-brand-mark">G</span><span>GS2500</span>','navigate',{className:'brand-button',data:{route:owner?'owner':'home'}})}<button type="button" class="ob-collapse-button" data-action="toggle-sidebar" aria-label="사이드바 접기" aria-controls="workspace-sidebar" aria-expanded="${!vm.sidebarCollapsed}">${icon('panel-left')}</button></div>
       <div class="ob-sidebar-content">
       ${!owner?button(icon('search')+'<span>점포와 화면 찾기</span><kbd>⌘ K</kbd>','open-search',{className:'search-trigger'}):''}
-      <nav aria-label="워크스페이스">${owner ? nav('매니저 제안','owner',true,'layers') : `${nav('점포 운영','home',operations,'home')}${nav('진열 시뮬레이션','board',simulation,'layers')}${nav('담당 점포 실적','portfolio',vm.route==='portfolio','chart')}${nav('4주 회고','review',vm.route==='review','history')}`}</nav>
+      <nav aria-label="워크스페이스">${owner ? nav('매니저 제안','owner',true,'layers') : `${nav('담당 점포 실적','portfolio',vm.route==='portfolio','chart')}${nav('진열 시뮬레이션','board',simulation,'layers')}${nav('진열 시뮬레이션 결과','review',vm.route==='review','history')}${nav('점포 운영','home',operations,'home')}`}</nav>
       ${!owner?`<div class="nav-section-label">담당 점포 <span>${vm.stores.length}</span></div><div class="sidebar-stores">${vm.stores.map(s=>button(`${icon('store',{size:15})}<span>${escape(s.name)}</span><i class="store-state ${s.yoy<0?'attention':''}" aria-label="${s.yoy<0?'실적 검토 필요':'실적 유지'}"></i>`,'ops-store',{className:`store-nav ${s.id===vm.store?.id&&operations?'active':''}`,data:{store:s.id}})).join('')}</div>`:''}
       </div>
       <div class="ob-sidebar-footer"><div class="ob-live-strip"><span><i class="demo-dot"></i> LOCAL DEMO</span><div><span>담당 점포 <b>${vm.stores.length}</b></span><span>승인 <b>${Object.keys(vm.state?.approvals??{}).length}</b></span></div></div>
@@ -72,7 +73,7 @@ function shell(vm, content) {
 function topline(vm) {
   if(vm.route==='owner') return vm.approval ? '사장님, 담당 매니저가 승인한 진열 제안입니다.' : '승인된 제안이 도착하면 이곳에서 확인할 수 있어요.';
   if(vm.route==='home') return '점포의 실적에서 출발해, 이번 주의 작은 변화를 결정합니다.';
-  if(vm.route==='review') return '좋은 결과와 부진한 결과를 함께 보고, 다음 지원을 고릅니다.';
+  if(vm.route==='review') return '이미 적용한 진열 제안의 경과와 성과를 추적합니다.';
   if(vm.route==='board') return '여러 점포의 후보를 같은 조건으로 비교합니다.';
   return `${vm.bays.length}개 매대의 합성 진열 가설을 준비했습니다. 실행 전 비교하고 승인하세요.`;
 }
@@ -89,13 +90,17 @@ function referencePhoto({compact=false}={}) {
   return `<figure class="reference-photo ${compact?'compact':''}"><div class="photo-frame"><img src="/workspace/assets/bay-reference.jpg" alt="콘티에 제공된 진열 매대 참고 사진" loading="lazy"><span class="photo-label">콘티 참고 사진 · 현재 모습</span></div><figcaption>실제 점포 촬영·업로드 기록이 아닙니다.<br>사진 속 품목과 합성 SKU는 다르며, 정확한 배치는 선반 도식 기준입니다.</figcaption></figure>`;
 }
 function evidence(vm, compact=false) {
-  return `<section class="evidence ${compact?'compact-evidence':''}" aria-label="제안 근거">${small('지금 이 매대를 보는 이유')}${(vm.bay?.evidence ?? []).map((row,i) => `<article class="evidence-item"><span class="evidence-number">${String(i+1).padStart(2,'0')}</span><div><h3>${escape(typeof row==='string'?row:row.title)}</h3><p>${escape(row.text ?? '')}</p><span class="source-label">${escape(row.source ?? '합성 데모 가정')} · 검증할 가설</span></div></article>`).join('')}</section>`;
+  const rows = vm.candidate?.evidence ?? vm.bay?.evidence ?? [];
+  return `<section class="evidence ${compact?'compact-evidence':''}" aria-label="제안 근거">${small('지금 이 매대를 보는 이유')}${rows.map((row,i) => `<article class="evidence-item"><span class="evidence-number">${String(i+1).padStart(2,'0')}</span><div><h3>${escape(typeof row==='string'?row:row.title)}</h3><p>${escape(row.text ?? '')}</p><span class="source-label">${escape(row.source ?? '합성 데모 가정')} · 검증할 가설</span></div></article>`).join('')}</section>`;
 }
 function shelf(vm, baseline=false) {
   const rows = placements(vm,baseline), products = productMap(vm);
   const changed = new Set(changes(vm).map(row=>row.productId));
   if(!rows.length) return `<div class="empty compact-empty">선반 좌표를 불러오지 못했습니다. 3D 연결 상태를 확인해 주세요.</div>`;
-  return `<div class="shelf-diagram" aria-label="${baseline?'현재':'후보'} 선반 배치"><div class="shelf-caption">${small(baseline?'AS-IS · 현재 본사 표준':'TO-BE · '+(vm.candidate?.name ?? '선택안'))}<span class="mono">SKU ${new Set(rows.map(row=>row.productId)).size}</span></div>${[4,3,2,1].map(level => `<div class="shelf-level ${level===2||level===3?'eye-level':''}"><div class="level-label"><strong>${level}단</strong>${level===2||level===3?'<span>눈높이 가정</span>':''}</div><div class="shelf-products">${rows.filter(row=>row.level===level).sort((a,b)=>a.column-b.column).map(row=>`<div class="shelf-product ${!baseline&&changed.has(row.productId)?'moved':''}" title="${escape(`${row.productId} · ${level}단 ${row.column}열 · XYZ ${(row.position??[]).map(x=>Number(x).toFixed(2)).join(', ')}`)}"><span>${escape(products[row.productId]?.name ?? row.productId)}</span><small>${row.column}열${!baseline&&changed.has(row.productId)?' · 이동':''}</small></div>`).join('')}</div></div>`).join('')}<p class="micro">아래부터 1단 · 위치·좌우 이웃은 기존 3D와 동일한 SKU 계약을 사용합니다.</p></div>`;
+  const instruction = baseline
+    ? '<p class="micro">아래부터 1단 · 현재 상품 위치입니다.</p>'
+    : '<p class="shelf-change-legend"><strong>초록색 칸만 옮겨 주세요</strong><span>나머지 칸은 그대로 유지</span></p>';
+  return `<div class="shelf-diagram" aria-label="${baseline?'현재':'후보'} 선반 배치"><div class="shelf-caption">${small(baseline?'AS-IS · 현재 본사 표준':'TO-BE · '+(vm.candidate?.name ?? '선택안'))}<span class="mono">SKU ${new Set(rows.map(row=>row.productId)).size}</span></div>${[4,3,2,1].map(level => `<div class="shelf-level ${level===2||level===3?'eye-level':''}"><div class="level-label"><strong>${level}단</strong>${level===2||level===3?'<span>눈높이 가정</span>':''}</div><div class="shelf-products">${rows.filter(row=>row.level===level).sort((a,b)=>a.column-b.column).map(row=>`<div class="shelf-product ${!baseline&&changed.has(row.productId)?'moved':''}" title="${escape(`${row.productId} · ${level}단 ${row.column}열 · XYZ ${(row.position??[]).map(x=>Number(x).toFixed(2)).join(', ')}`)}"><span>${escape(products[row.productId]?.name ?? row.productId)}</span><small>${row.column}열${!baseline&&changed.has(row.productId)?' · 이동':''}</small></div>`).join('')}</div></div>`).join('')}${instruction}</div>`;
 }
 function stockWarnings(vm) {
   const inventory = vm.inventory?.total;
@@ -188,34 +193,11 @@ function owner(vm) {
   const safePhoto=typeof response?.photoUrl==='string'&&response.photoUrl.startsWith('blob:')?response.photoUrl:'';
   return `${titleTags(vm)}${heading('APPROVED PROPOSAL',escape(vm.candidate.name),'사장님이 가능한 범위에서 선택해 주세요. 일부만 실행하거나 어렵다고 알려주셔도 괜찮습니다.',badge('매니저 승인됨','positive'))}<div class="owner-burden">${badge('약 '+vm.candidate.minutes+'분')}${badge(vm.candidate.orderSkus.length?'추가 발주 검토 '+vm.candidate.orderSkus.length+' SKU':'새로 시킬 물건 없음')}${badge('자동 발주 없음')}</div><div class="owner-instructions"><div class="owner-photo">${referencePhoto({compact:true})}</div><div class="owner-diagrams">${shelf(vm)}<details class="current-shelf"><summary>현재 진열과 비교하기</summary>${shelf(vm,true)}</details><div class="approved-message"><h3>매니저의 안내</h3><p>${escape(vm.approval.message)}</p></div></div></div>${stockWarnings(vm)}${evidence(vm,true)}<div class="callout forecast-callout"><strong>승인 당시 · 대상 24 SKU의 30일 가상 매출</strong><p>현재 진열 대비 <span class="mono ${tone(result?.deltaPercent)}">${result?percent(result.deltaPercent):'—'}</span>로 계산됐습니다. 실제 관측 실적이나 점포 전체 매출이 아니며, 매출 증가를 보장하지 않습니다.</p></div><section class="response-panel"><div class="section-heading"><div><h2>어떻게 진행하셨나요?</h2><p>회신과 사진은 접수만 합니다. 실행 여부를 자동으로 판독하지 않습니다.</p></div>${response?.status?badge(statuses[response.status]??'회신됨','positive'):badge('회신 대기')}</div><label class="field-label" for="owner-note">사장님 의견 <span>선택 사항</span></label><textarea id="owner-note" rows="3" maxlength="1000" placeholder="예: 공간이 부족해서 2단만 옮겼어요. 나머지는 주말에 검토할게요.">${escape(response?.note ?? '')}</textarea><div class="response-actions">${button('제안대로 했어요','respond',{className:`button ${response?.status==='accepted'?'primary':''}`,data:{status:'accepted'}})}${button('일부만 했어요','respond',{className:`button ${response?.status==='partial'?'primary':''}`,data:{status:'partial'}})}${button('이건 어려워요','respond',{className:`button ${response?.status==='declined'?'primary':''}`,data:{status:'declined'}})}</div><div class="photo-upload"><div><h3>${response?.photoName?'사진 접수됨':'사진 한 장을 남겨 주세요'}</h3><p>${response?.photoName?escape(response.photoName):'수용 또는 부분 실행으로 회신한 뒤 사진을 선택해 주세요. JPEG · PNG · WebP, 최대 5 MB.'}</p></div><input class="visually-hidden" id="photo-file" type="file" accept="image/jpeg,image/png,image/webp" aria-label="점주 사진 파일 선택">${button(response?.photoName?'다른 사진 선택':'사진 선택·접수','upload-photo',{className:'button primary',disabled:!['accepted','partial'].includes(response.status)})}</div><div id="photo-preview">${safePhoto?`<img class="upload-preview" src="${escape(safePhoto)}" alt="점주가 접수한 사진 미리보기">`:''}</div><p class="micro">사진은 이 페이지의 메모리에만 보관됩니다. 새로고침하면 사진과 미리보기가 사라집니다. 실제 서버에 업로드하거나 진열 실행을 검증하지 않습니다.</p><div class="observation-plan"><strong>다음 4주, 이렇게 같이 살펴봐요.</strong><span>회전·품절·작업 부담과 주변 행사를 함께 기록하고, 진열 외 다른 설명도 확인합니다.</span></div></section><div class="action-bar"><p>사진 접수는 진열 변경 완료의 증거가 아닙니다.</p>${button('매니저 화면에서 회신 보기','role-manager',{className:'button primary'})}</div>`;
 }
-function review(vm) {
-  const review=vm.review??{}, counters=review.counters??review;
-  const proposed=counters.proposed??counters.proposals??vm.bays.length;
-  const approved=counters.approved??(vm.approval?1:0);
-  const responded=counters.responded??counters.responses??(vm.response?.status?1:0);
-  const photos=counters.photos??counters.photosReceived??(vm.response?.photoName?1:0);
-  const rows=review.rows??vm.bays.map(bay=>({bay,store:storeOf(vm,bay),approval:vm.approval?.storeId===bay.storeId&&vm.approval?.bayId===bay.id?vm.approval:null,response:vm.approval?.storeId===bay.storeId&&vm.approval?.bayId===bay.id?vm.response:null}));
-  return heading('FOLLOW-UP · 4 WEEKS','제안의 끝은 실행이 아니라, 다음 판단','현재 데모의 승인·회신 집계와 별도로, 4주 후 합성 관찰 사례를 구분합니다.')+
-    `<section class="review-funnel">${metric('제안한 매대',proposed,` / ${proposed}`,`분모 ${proposed}개 매대 고정`)}<span class="funnel-arrow">→</span>${metric('매니저 승인',approved,` / ${proposed}`,`${number(proposed?approved/proposed*100:0)}% · 실제 데모 선택`)}<span class="funnel-arrow">→</span>${metric('점주 회신',responded,` / ${proposed}`,`사진 접수 ${photos}건 · 실행 검증 아님`)}</section>
-    <div class="section-heading"><h2>승인과 회신이 어디까지 이어졌나요?</h2><span class="mono muted">같은 브라우저의 데모 기록</span></div><div class="review-list">${rows.map(row=>{
-      const bay=row.bay??vm.bays.find(b=>b.id===row.bayId&&b.storeId===row.storeId), store=row.store??storeOf(vm,bay), approval=row.approval, response=row.response;
-      const result=approval?.result;
-      return `<article class="review-card"><div class="review-card-head"><div>${badge(store?.name??row.storeName??'점포','solid')}<h3>${escape(bay?.name??row.bayName??'매대')}</h3><span class="mono muted">${escape(bay?.id??row.bayId)}</span></div>${badge(!approval?'승인 대기':!response?.status?'회신 없음':response.status==='declined'?'실행 어려움':response.status==='partial'?'부분 실행 회신':'수용 회신',approval&&!response?.status?'negative':'')}</div><div class="review-card-body"><div>${small('승인 당시 · 30일 가상 예상')}<strong class="review-value">${result?percent(result.deltaPercent):'—'}</strong><p>${approval?`옵션 ${escape(approval.candidateId)} · 현재 진열 대비`:'승인한 후보 없음'}</p></div><div>${small('현재 데모의 실제 상태')}<strong class="review-value">${row.photo?.fileName||response?.photoName?'사진 접수됨':response?.status?'회신 접수됨':approval?'회신 대기':'검토 대기'}</strong><p>4주 관찰치 없음 · 실행 여부 자동 검증 안 함</p></div><div class="review-comment"><strong>${row.photo?.fileName||response?.photoName?'사진 접수됨 · 실행 검증 아님':response?.status?'점주 회신':'다음 지원을 결정하기 전'}</strong><p>${escape(response?.note||(!approval?'담당 매니저의 검토를 기다립니다.':'회신을 먼저 확인하고 작업 시간·인력·발주 여건을 살펴보세요.'))}</p></div></div></article>`;
-    }).join('')}</div>${syntheticCases(vm)}<div class="section-heading"><h2>본사에 올라가는 다음 판단</h2><span class="micro">작은 표본으로 전국 확대를 확정하지 않습니다</span></div><div class="next-decisions"><article>${small('지침 후보')}<h3>좋은 사례는 지침의 검토 안건으로</h3><p>관찰된 변화만으로 진열 효과를 단정하지 않고, 다음 주기에 같은 조건의 매대를 더 비교합니다.</p></article><article>${small('현장 지원')}<h3>어려웠던 제안에는 사람과 시간을</h3><p>부분 실행·거절·미회신의 이유를 먼저 듣고, 인력과 작업 부담을 줄일 방법을 찾습니다.</p></article><article>${small('수단 재검토')}<h3>품절이 원인이면 발주 가설을 함께</h3><p>진열만으로 설명되지 않는 부진은 재고·행사·상권 변화 등 다른 원인과 구분합니다.</p></article></div><div class="disclaimer"><strong>세 수치는 기준과 시점이 다릅니다.</strong> 전년 동기비는 작성된 점포 실적, 30일 예상은 가상 집계 계산, 4주 후 관찰은 별도의 합성 사례입니다. 사진 접수는 실제 실행 검증이 아니며 어느 수치도 제품의 인과적 효과를 뜻하지 않습니다.</div>`;
-}
-function syntheticCases(vm) {
-  const cases=vm.review?.cases??[];
-  if(!cases.length)return '';
-  return `<section class="synthetic-cases"><div class="section-heading"><div>${small('HYPOTHETICAL FOLLOW-UP · 별도 작성 사례')}<h2>4주 후라면, 어떤 지원이 필요할까요?</h2><p>아래는 현재 승인·회신과 관계없는 합성 시나리오입니다. 위 퍼널이나 현재 성과에 포함하지 않습니다.</p></div>${badge('관찰 예시 · 실제 발생 아님','synthetic')}</div><div class="synthetic-case-grid">${cases.map(row=>{
-    const store=vm.stores.find(item=>item.id===row.storeId),before=row.yoyBefore??row.beforeYoy,after=row.yoyAfter??row.afterYoy;
-    return `<article class="synthetic-case"><div>${badge(row.headline??'합성 사례',row.status==='improved'?'positive':row.status==='no-reply'?'negative':'')}<span>${escape(store?.name)}</span></div><span class="eyebrow">4주 후 합성 관찰 · 전년 동기비</span><strong class="review-value ${after!=null?tone(after):''}">${after!=null?`${percent(before)} → ${percent(after)}`:'관찰치 없음'}</strong><p>${escape(row.explanation??row.reason)}</p></article>`;
-  }).join('')}</div></section>`;
-}
 function emptySelection() {return `<div class="empty"><h1>선택한 매대를 찾지 못했습니다.</h1><p>목록에서 점포와 매대를 다시 선택해 주세요.</p>${button('매대 목록으로','navigate',{className:'button primary',data:{route:'bays'}})}</div>`;}
 
 export function renderApp(vm) {
   const safe={stores:[],bays:[],results:{},...vm};
   if(safe.route==='login')return login(safe);
-  const views={home:renderOperationsOverview,portfolio:home,operations:renderOperationsHistory,recommendations:renderRecommendations,evidence:renderEvidence,bays,bay,board,candidate,owner,review};
+  const views={home:renderOperationsOverview,portfolio:home,operations:renderOperationsHistory,recommendations:renderRecommendations,evidence:renderEvidence,bays,bay,board,candidate,owner,review:renderProposalHistory};
   return shell(safe,(views[safe.route]??home)(safe));
 }

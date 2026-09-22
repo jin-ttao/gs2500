@@ -30,6 +30,15 @@ const candidateDefinitions = [
   { id: 'C', scenario: 'discovery', name: SCENARIOS.discovery.title, minutes: 12, orderSkus: ['proteinbar'], description: '합성 신상품 5종을 2층에 모아 탐색을 유도하는 가설. 트렌드는 데모 가정이며 추가 발주는 검토만 합니다.' },
 ];
 
+// Authored recommendation examples, not collected events, social signals or
+// observed sales. These explain the demo proposal; they do not change forecasts.
+const yeoksamEvidence = [
+  { id: 'timing', title: '인근 행사로 늘어날 퇴근길 수요, 지금 재고로 먼저 준비합니다', text: '행사 후 역으로 향하는 고객이 늘어나는 상황을 가정했습니다. 짧은 동선에서 바로 고를 수 있도록 컵라면·스낵을 입구 매대 2·3단에 배치합니다.', source: '시의성 · 주변 행사와 시간대 수요를 연결한 데모 가정', status: 'assumed' },
+  { id: 'trend', title: '온라인에서 찾는 젤리·제로 음료, 이미 우리 매장에 있습니다', text: '젤리·제로 음료의 온라인 관심이 높아진 상황을 가정했습니다. 새로 발주하기 전에 보유 재고를 3단 눈높이에 모아, 관심이 구매로 이어지는지 비교합니다.', source: '온라인 트렌딩 · 실시간 수집이 아닌 데모 가정', status: 'assumed' },
+  { id: 'similar-stores', title: '비슷한 역세권 점포에서 통했던 배치, 우리 재고로 적용합니다', text: '퇴근 고객 비중과 매장 규모가 비슷한 가상 점포의 성공 사례를 설정했습니다. 컵라면·스낵을 눈높이에 둔 배치를 이 점포의 보유 상품으로 시험합니다.', source: '유사 점포 성과 · 비교 사례를 설정한 데모 가정', status: 'assumed' },
+  { id: 'past-sales', title: '이 매장에서 잘 팔렸던 간식, 새 발주 없이 다시 앞자리로', text: '과거 퇴근 시간대에 컵라면·쿠키가 잘 팔렸던 이력을 가정했습니다. 창고에 남은 재고를 2단에 보충하며, 같은 수요가 다시 이어지는지 확인합니다.', source: '과거 판매 이력 · 실제 POS 기록이 아닌 데모 가정', status: 'assumed' },
+];
+
 export const BAYS = freeze(STORES.map(store => ({
   id: store.bayId, storeId: store.id, name: '입구 행사 매대', fixtureId: 'promo',
   baselineScenario: 'hq', baselineName: '현재 진열 · 본사 표준안',
@@ -40,7 +49,9 @@ export const BAYS = freeze(STORES.map(store => ({
     { id: 'placement', title: '눈높이·좌우 위치·이웃 상품', text: '2·3층 노출, 중앙 위치, 보완 상품 인접 효과는 실측 계수가 아닌 비교 실험 가정입니다.', source: 'demo/merchandising.js', status: 'assumed' },
     { id: 'trend', title: '신상품 관심 신호', text: '프로틴바·젤리 관심 상승은 데모 가정입니다. 실제 SNS를 수집하거나 실시간 유행을 확인하지 않았습니다.', source: 'authored-trend-assumption', status: 'assumed' },
   ],
-  candidates: candidateDefinitions.map(candidate => ({ ...candidate, orderSkus: [...candidate.orderSkus], disabled: false })),
+  candidates: candidateDefinitions.map(candidate => ({ ...candidate, orderSkus: [...candidate.orderSkus], disabled: false,
+    ...(store.id === 'H-0521' && candidate.id === 'A' ? { evidence: yeoksamEvidence } : {}),
+  })),
 })));
 
 export function getStore(storeId) {

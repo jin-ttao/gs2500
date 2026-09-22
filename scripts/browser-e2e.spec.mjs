@@ -94,6 +94,45 @@ async function approvedOwner(page, candidateId = 'B') {
   await expect(page.locator('.option-card, .forecast-card, #world-board, #world-detail')).toHaveCount(0);
 }
 
+async function openSessionRecords(page) {
+  const session = page.locator('details.history-session');
+  await expect(session.locator('summary')).toContainText('이번 세션에서 보낸 제안');
+  await expect(session).not.toHaveAttribute('open', '');
+  await session.locator('summary').click();
+  await expect(session).toHaveAttribute('open', '');
+  return session;
+}
+
+test('main menu leads to applied proposal history with exact period and follow-up filters', async ({ page }) => {
+  await login(page);
+  const navigation = page.locator('nav[aria-label="워크스페이스"] .nav-item');
+  await expect(navigation).toHaveText(['담당 점포 실적', '진열 시뮬레이션', '진열 시뮬레이션 결과', '점포 운영']);
+  for (const [index, route] of ['portfolio', 'board', 'review', 'home'].entries()) {
+    await expect(navigation.nth(index)).toHaveAttribute('data-route', route);
+  }
+  await navigation.nth(2).click();
+  await expect(page.getByRole('heading', { name: '진열 시뮬레이션 결과', exact: true })).toBeVisible();
+  await expect(page.locator('.history-card')).toHaveCount(4);
+  await expect(page.locator('.history-card[data-period="14"]')).toHaveCount(2);
+  await expect(page.locator('.history-card[data-period="28"]')).toHaveCount(2);
+  await expect(page.locator('.history-session')).toHaveCount(0);
+
+  await action(page, 'history-period', { value: '14' }).click();
+  await expect(action(page, 'history-period', { value: '14' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.history-card')).toHaveCount(2);
+  await expect(page.locator('.history-card[data-period="14"]')).toHaveCount(2);
+  await action(page, 'history-period', { value: '28' }).click();
+  await expect(page.locator('.history-card')).toHaveCount(2);
+  await expect(page.locator('.history-card[data-period="28"]')).toHaveCount(2);
+  await action(page, 'history-period', { value: 'all' }).click();
+  await action(page, 'history-status', { value: 'attention' }).click();
+  await expect(action(page, 'history-status', { value: 'attention' })).toHaveAttribute('aria-pressed', 'true');
+  await expect(page.locator('.history-card')).toHaveCount(1);
+  await expect(page.locator('.history-card[data-status="attention"]')).toHaveCount(1);
+  await action(page, 'history-status', { value: 'all' }).click();
+  await expect(page.locator('.history-card')).toHaveCount(4);
+});
+
 test('manager → unpublished owner → comparison → exact approval → partial reply/photo → review', async ({ page }) => {
   const started = Date.now();
   await login(page);
@@ -124,12 +163,11 @@ test('manager → unpublished owner → comparison → exact approval → partia
   await expect(page.locator('.response-panel')).toContainText('실제 서버에 업로드하거나 진열 실행을 검증하지 않습니다.');
 
   await action(page, 'role-manager').first().click();
-  await expect(page.getByRole('heading', { name: '제안의 끝은 실행이 아니라, 다음 판단', exact: true })).toBeVisible();
-  await expect(page.locator('.review-funnel .metric').nth(0)).toContainText(`${BAYS.length} / ${BAYS.length}`);
-  await expect(page.locator('.review-funnel .metric').nth(1)).toContainText(`1 / ${BAYS.length}`);
-  await expect(page.locator('.review-funnel .metric').nth(2)).toContainText(`1 / ${BAYS.length}`);
-  await expect(page.locator('.review-funnel')).toContainText('사진 접수 1건');
-  const primaryReview = page.locator('.review-card').filter({ has: page.locator('.badge', { hasText: '삼성역점' }) });
+  await expect(page.getByRole('heading', { name: '진열 시뮬레이션 결과', exact: true })).toBeVisible();
+  await expect(page.locator('.history-card')).toHaveCount(4);
+  const session = await openSessionRecords(page);
+  await expect(session.locator('.review-card')).toHaveCount(1);
+  const primaryReview = session.locator('.review-card').filter({ has: page.locator('.badge', { hasText: '삼성역점' }) });
   await expect(primaryReview).toContainText('부분 실행 회신');
   await expect(primaryReview).toContainText('옵션 B');
   await expect(primaryReview).toContainText('2단만 옮겼어요');
@@ -148,10 +186,11 @@ test('declined proposal stays a refusal; upload failure does not imply execution
   await expect(page.locator('.upload-preview')).toHaveCount(0);
 
   await action(page, 'role-manager').first().click();
-  const review = page.locator('.review-card').filter({ has: page.locator('.badge', { hasText: '삼성역점' }) });
+  const session = await openSessionRecords(page);
+  const review = session.locator('.review-card').filter({ has: page.locator('.badge', { hasText: '삼성역점' }) });
   await expect(review).toContainText('실행 어려움');
   await expect(review).toContainText('행사 계약');
-  await expect(page.locator('.review-funnel')).toContainText('사진 접수 0건');
+  await expect(review).not.toContainText('사진 접수됨');
   await action(page, 'reset-demo').click();
   await expect(page.getByRole('button', { name: '데모 로그인', exact: true })).toBeVisible();
   await login(page);
