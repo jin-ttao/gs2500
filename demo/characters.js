@@ -2,6 +2,13 @@ import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { clone } from 'three/addons/utils/SkeletonUtils.js';
 
+/** Only forecast presentation agents opt in. Live simulation retains its
+ * existing delta-time animation, while recorded replay can sample exact poses. */
+export function presentationClipTime(agent,duration){
+  if(agent?.presentationOnly!==true||!Number.isFinite(agent.presentationAnimationTime)||!Number.isFinite(duration)||duration<=0)return null;
+  return ((agent.presentationAnimationTime%duration)+duration)%duration;
+}
+
 export async function loadCharacters() {
   const gltf = await new GLTFLoader().loadAsync('./assets/shopper.glb');
   const colors = ['#496077','#954f51','#657851','#806488','#337477','#9d873e','#6a6b79'];
@@ -50,11 +57,19 @@ export async function loadCharacters() {
       let action=moving?(agent.basket.length?'Carry':'Walk'):agent.state==='browsing'?'Browse':agent.state==='paying'?'Pay':'Idle';
       if(agent.state==='reaching')action=agent.reachLevel===1?'ReachLow':agent.reachLevel===4?'ReachHigh':'ReachMiddle';
       const actionSpeed=moving?agent.speed/1.05:1;
-      // Rebinding a paused world must show its current pose, not an unadvanced idle rig.
-      if(snap){mixer.stopAllAction();current=null;}
-      play(action,actionSpeed);
-      if(snap){actions[action].time=((agent.stateTime||0)*actionSpeed)%actions[action].getClip().duration;mixer.update(0);}
-      else mixer.update(dt);
+      const absoluteTime=presentationClipTime(agent,actions[action]?.getClip().duration);
+      if(absoluteTime!==null){
+        // No cross-fade is allowed to accumulate while the mixer receives a
+        // zero delta. The recorded action and its explicit time own the pose.
+        if(snap||current!==action){mixer.stopAllAction();current=null;}
+        play(action,1);actions[action].time=absoluteTime;mixer.update(0);
+      }else{
+        // Rebinding a paused live world must show its current pose.
+        if(snap){mixer.stopAllAction();current=null;}
+        play(action,actionSpeed);
+        if(snap){actions[action].time=((agent.stateTime||0)*actionSpeed)%actions[action].getClip().duration;mixer.update(0);}
+        else mixer.update(dt);
+      }
       carrier.visible=agent.basket.length>0;
       if(leftHand){leftHand.getWorldPosition(carrier.position);carrier.position.y-=.14;carrier.rotation.y=root.parent?.rotation.y||0;}
     },dispose(){mixer.stopAllAction();mixer.uncacheRoot(root);privateMaterials.forEach(m=>m.dispose());paper.geometry.dispose();handle.geometry.dispose();bagMaterial.dispose();}};

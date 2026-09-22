@@ -1,0 +1,64 @@
+.ui-icon { flex: 0 0 auto; vertical-align: middle; }
+.ui-chart { --ui-chart-accent: var(--studio-accent, #c4ef83); --ui-chart-muted: #a5aaa8; color: var(--ui-chart-accent); width: 100%; min-width: 0; }
+.ui-chart-legend { display: flex; align-items: center; gap: 18px; color: #c3c7c5; font-size: 11.5px; line-height: 1.5; padding: 0 2px 10px; }
+.ui-chart-legend > span { display: inline-flex; align-items: center; gap: 7px; }
+.ui-chart-key { width: 14px; height: 3px; background: var(--ui-chart-accent); border-radius: 9px; }
+.ui-chart-key-previous { background: repeating-linear-gradient(90deg, #777e77 0 4px, transparent 4px 7px); }
+.ui-chart-legend > .ui-chart-unit { margin-left: auto; color: var(--ui-chart-muted); font-size: 11.5px; }
+.ui-revenue-svg { display: block; width: 100%; height: auto; overflow: visible; }
+.ui-chart-axis line { stroke: #ffffff0d; stroke-width: 1; stroke-dasharray: 3 5; }
+.ui-chart-axis text, .ui-chart-date { fill: var(--ui-chart-muted); font-family: inherit; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.ui-chart-line { fill: none; stroke: var(--ui-chart-accent); stroke-width: 2.3; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.ui-chart-previous { fill: none; stroke: #767e74; stroke-width: 1.5; stroke-dasharray: 4 5; stroke-linecap: round; stroke-linejoin: round; vector-effect: non-scaling-stroke; }
+.ui-chart-comparison-dot { fill: #767e74; }
+.ui-chart-event line { stroke: var(--ui-chart-accent); stroke-opacity: .14; stroke-dasharray: 2 4; }
+.ui-chart-event circle { fill: var(--ui-chart-accent); fill-opacity: .5; }
+.ui-chart-point { cursor: help; outline: none; }
+.ui-chart-point-target { fill: transparent; }
+.ui-chart-point-dot { fill: #191a1b; stroke: var(--ui-chart-accent); stroke-width: 1.5; opacity: 0; transition: opacity .16s ease; }
+.ui-chart-point:hover .ui-chart-point-dot, .ui-chart-point:focus .ui-chart-point-dot, .ui-chart-point-isolated .ui-chart-point-dot { opacity: 1; }
+.ui-chart-point:focus .ui-chart-point-target { fill: var(--ui-chart-accent); fill-opacity: .11; stroke: var(--ui-chart-accent); stroke-width: 1; }
+.ui-chart-events { display: flex; flex-wrap: wrap; gap: 7px; padding: 8px 0 2px; }
+.ui-chart-events > span { display: inline-flex; align-items: center; gap: 6px; max-width: 100%; border: 1px solid #303234; border-radius: 5px; padding: 5px 8px; color: #a5aaa8; background: #ffffff03; font-size: 11.5px; line-height: 1.45; }
+.ui-chart-events > span > span { overflow-wrap: anywhere; }
+.ui-chart-data { color: #a5aaa8; margin-top: 8px; font-size: 11.5px; }
+.ui-chart-data summary { display: inline-flex; align-items: center; gap: 5px; cursor: pointer; border-radius: 4px; padding: 4px 0; list-style: none; }
+.ui-chart-data summary::-webkit-details-marker { display: none; }
+.ui-chart-data summary .ui-icon { transition: transform .16s ease; }
+.ui-chart-data[open] summary .ui-icon { transform: rotate(180deg); }
+.ui-chart-data summary:focus-visible, .ui-segmented button:focus-visible { outline: 2px solid var(--studio-accent, #c4ef83); outline-offset: 4px; }
+.ui-chart-table-wrap { overflow: auto; max-height: 220px; margin-top: 7px; border: 1px solid #ffffff0d; border-radius: 6px; }
+.ui-chart-data table { width: 100%; border-collapse: collapse; font-size: 11.5px; font-variant-numeric: tabular-nums; }
+.ui-chart-data caption { text-align: left; padding: 10px 12px; color: #a5aaa8; }
+.ui-chart-data th, .ui-chart-data td { padding: 9px 12px; text-align: right; border-top: 1px solid #ffffff0a; white-space: nowrap; }
+.ui-chart-data th:first-child { text-align: left; }
+.ui-chart-data th { color: #b6bcb0; font-weight: 500; }
+.ui-chart-data td { color: #dfe4da; }
+.ui-chart-empty { min-height: 245px; display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 10px; text-align: center; color: #a5aaa8; }
+.ui-chart-empty-icon { width: 54px; height: 54px; border: 1px solid #ffffff0d; border-radius: 13px; display: grid; place-items: center; color: #b9c0b1; background: #ffffff03; }
+.ui-chart-empty p { margin: 0; color: #d2d8ca; font-size: 13px; }
+.ui-chart-empty > span:last-child { font-size: 11.5px; }
+.ui-sparkline { display: block; width: 120px; max-width: 100%; height: 34px; }
+.ui-segmented { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 2px; background: #141516; padding: 3px; border: 1px solid #303234; border-radius: 7px; }
+.ui-segmented button { appearance: none; min-height: 29px; border: 1px solid transparent; border-radius: 4px; padding: 5px 11px; background: transparent; color: #a5aaa8; font: inherit; font-size: 11.5px; line-height: 1.4; cursor: pointer; transition: color .15s, background .15s, border-color .15s; }
+.ui-segmented button:hover { color: #e0e4e1; }
+.ui-segmented button[aria-pressed="true"] { color: var(--studio-accent, #c4ef83); background: #282b29; border-color: #394037; box-shadow: 0 1px 3px #0003; }
+.ui-stat-card { min-width: 0; padding: 19px 20px 17px; background: #191a1b; border: 1px solid #303234; border-radius: 10px; }
+.ui-stat-header { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: #a5aaa8; font-size: 11.5px; line-height: 1.6; }
+.ui-stat-header .ui-icon { color: #a5aaa8; }
+.ui-stat-value { margin-top: 15px; color: #f1f3f2; font-size: clamp(23px, 2.1vw, 31px); letter-spacing: -.045em; font-weight: 600; line-height: 1.25; font-variant-numeric: tabular-nums; overflow-wrap: anywhere; }
+.ui-stat-footer { display: flex; align-items: baseline; flex-wrap: wrap; gap: 6px; min-height: 17px; margin-top: 9px; font-size: 11.5px; line-height: 1.5; }
+.ui-stat-trend { font-variant-numeric: tabular-nums; }
+.ui-stat-trend-up { color: var(--studio-accent, #c4ef83); }
+.ui-stat-trend-down { color: #e9b09a; }
+.ui-stat-trend-neutral { color: #bfc5c2; }
+.ui-stat-detail { color: #a5aaa8; }
+@media (max-width: 600px) {
+  .ui-chart-legend { gap: 12px; }
+  .ui-stat-card { padding: 16px; }
+  .ui-stat-value { margin-top: 10px; }
+  .ui-chart-axis text, .ui-chart-date { font-size: 13px; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .ui-chart-point-dot, .ui-chart-data summary .ui-icon, .ui-segmented button { transition: none; }
+}

@@ -1,0 +1,36 @@
+/* Store → plan → image are one DOM hierarchy. The 3D surface belongs to the
+   viewport, so scrolling and clipping cannot separate it from its metrics. */
+.world-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,560px),1fr));gap:18px;margin:16px 0}
+.world-store{min-width:0;border:1px solid #34454a;border-radius:12px;padding:16px;background:#19272d;color:#edf2ef}
+.world-store h3{margin:0 0 12px;font-size:15px;display:flex;align-items:baseline;gap:8px}
+.world-store h3 small{font-size:11px;color:#a9bebd;font-weight:400}
+.world-options{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;align-items:stretch}
+.world-card{display:flex;flex-direction:column;min-width:0;position:relative;border:1px solid #42525a;border-radius:9px;padding:10px;background:#223239;color:#edf2ef;text-align:left;cursor:pointer;font:inherit;overflow:hidden}
+.world-card.selected{border-color:#69d2c1;box-shadow:0 0 0 1px #69d2c1}
+.world-card:hover:not(:disabled){border-color:#91c9c1}
+.world-card:disabled{opacity:1;cursor:default}
+.world-card header{display:flex;justify-content:space-between;align-items:center;min-height:22px;font-size:12px;gap:6px}
+.world-card header span:first-child{font-weight:600}
+.world-card header span:last-child{color:#9ecbc2;font-size:10px}
+.world-viewport{width:100%;height:auto;flex:none;aspect-ratio:1.65;background:#d9e4e1;margin:9px 0 11px;border-radius:5px;overflow:hidden;position:relative;isolation:isolate}
+.world-viewport.detail{height:clamp(280px,29vw,430px);aspect-ratio:auto}
+.world-viewport>.card-world-surface{display:block;position:absolute;inset:0;width:100%;height:100%;z-index:0}
+.world-card strong{font-size:17px;letter-spacing:-.035em;white-space:nowrap;font-variant-numeric:tabular-nums}
+.world-card small{display:block;font-size:10px;line-height:1.65;color:#b9cbc9;margin-top:7px}
+.world-card footer{display:flex;justify-content:space-between;align-items:baseline;flex-wrap:wrap;gap:4px 8px;font-size:11px}
+.world-card footer span{color:#c3d3d0}
+.world-disclosure{font-size:11px;line-height:1.7;color:#718081;margin:10px 0}
+.world-error{padding:25px;border:1px dashed #c06b5c;background:#fff3eb;color:#633a31}
+.world-live-note{position:absolute;left:7px;bottom:7px;max-width:calc(100% - 14px);z-index:1;pointer-events:none;font:9px ui-monospace,monospace;line-height:1.5;background:#edf6eeeb;color:#285448;padding:4px 7px;border-radius:4px}
+.workspace-modal,.modal-backdrop,.approval-overlay,[role=dialog]{z-index:20!important}
+.world-controls{display:flex;align-items:center;flex-wrap:wrap;gap:10px 12px;font-size:11px;line-height:1.6;margin:10px 0}
+.world-controls button{font:inherit;border:1px solid #adb9b7;border-radius:5px;background:white;padding:7px 12px;cursor:pointer}
+.world-board{padding:14px}
+.world-detail .world-controls,.world-detail .world-disclosure{margin:12px}
+.world-detail>.world-card{border:0;border-radius:0}
+.contract-note{padding:12px 15px;background:#f5f3ec;border-left:2px solid #c8c0a8;font-size:12px;line-height:1.7}
+.workflow-toast{position:fixed;bottom:24px;right:24px;padding:14px 20px;background:#254b42;color:white;z-index:50;border-radius:8px;box-shadow:0 8px 25px #0002}
+.upload-error{color:#a53725;font-size:13px}
+.desktop-notice{display:none}
+@media(max-width:1000px){.desktop-notice{display:block;background:#fff1d4;padding:10px;font-size:12px}}
+.world-controls{display:grid;gap:14px;padding:16px;margin:0;border-bottom:1px solid #dbe2df;background:#f5f8f6}.world-transport{display:flex;align-items:center;flex-wrap:wrap;gap:10px}.world-transport label{display:flex;align-items:center;gap:6px;font-size:11px}.world-transport select{border:1px solid #bfcfc8;padding:6px;border-radius:5px;background:white;font:inherit}.world-scrubber{display:flex;gap:12px;align-items:center;font-size:11px}.world-scrubber input{flex:1;min-width:80px;accent-color:#238c7b}.world-scrubber output{min-width:34px;font-family:var(--mono)}.world-event-shortcuts{display:flex;gap:8px;flex-wrap:wrap;align-items:center;padding:12px 16px;font-size:11px}.world-event-shortcuts button{border:1px solid #d6dfd9;padding:5px 9px;border-radius:20px;background:#fff;color:#48655a;font:inherit}.world-plan-value{display:grid;grid-template-columns:1fr auto;gap:5px 8px;padding:5px 0 10px}.world-plan-value>span{font-size:12px;color:#bacbc7}.world-plan-value>strong{font-family:var(--mono);font-size:20px;letter-spacing:-.04em}.world-plan-value>small{grid-column:1/-1;color:#8de1cc;margin:0}.world-plan-secondary{display:flex;justify-content:space-between;flex-wrap:wrap;gap:4px;font-size:10px;color:#b6cac4;padding-bottom:12px}.world-plan-secondary b{font-weight:500}.world-card footer{display:grid;grid-template-columns:1fr auto;border-top:1px solid #41514e;padding-top:10px}.world-card footer>strong{font:13px var(--mono)}.world-card footer>span:last-child{grid-column:1/-1;font-size:10px;color:#a9bfb7}.world-card>[data-world-status]{font-size:9px;line-height:1.6}.ledger-explainer{display:grid;grid-template-columns:1fr 1.4fr;gap:20px;margin:20px 16px;padding:18px;border:1px solid #dce4df;border-radius:8px;background:#fff}.ledger-explainer h3{font-size:13px;margin-bottom:12px}.ledger-explainer p{font-size:11px;color:#6a7e72;margin-top:7px}.ledger-explainer ol{padding-left:18px;margin:0}.ledger-explainer li{font-size:11px;margin-bottom:9px}.ledger-explainer li span{display:block;color:#7b887e;font-size:10px;line-height:1.6}.world-disclosure{padding:0 16px 14px}.world-detail .world-card{display:block;border-radius:0;cursor:default}.world-detail .ledger-explainer{grid-template-columns:1fr}.world-detail .world-viewport.detail{height:auto;aspect-ratio:1.5}

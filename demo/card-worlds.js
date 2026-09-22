@@ -58,9 +58,51 @@ export function clipCardViewport(rect, width, height, clips=[]) {
   };
 }
 
+/** Client dimensions are unscaled; bounding rectangles include CSS zoom/scale. */
+export function cardClipBox(box,element) {
+  const scaleX=element.offsetWidth>0?box.width/element.offsetWidth:1;
+  const scaleY=element.offsetHeight>0?box.height/element.offsetHeight:1;
+  const left=box.left+element.clientLeft*scaleX,top=box.top+element.clientTop*scaleY;
+  return {left,top,right:left+element.clientWidth*scaleX,bottom:top+element.clientHeight*scaleY};
+}
+
+/** A DOM-owned image surface keeps a shared WebGL render inside its actual card.
+ * The source is copied immediately after drawing (no preserved GL buffer needed).
+ * Native overflow, rounded corners, transforms and compositor scrolling then apply
+ * to image and card together, rather than to a detached fixed overlay.
+ */
+export function createEmbeddedCardSurface(element,canvas=document.createElement('canvas')) {
+  const context=canvas.getContext('2d',{alpha:false});
+  if(!context)throw new Error('A 2D presentation surface is required for embedded cards.');
+  const previousPosition=element.style.position;
+  const ownsPosition=(globalThis.getComputedStyle?.(element).position??previousPosition??'static')==='static'||(!globalThis.getComputedStyle&&!previousPosition);
+  if(ownsPosition)element.style.position='relative';
+  canvas.className='card-world-surface';canvas.setAttribute('aria-hidden','true');
+  Object.assign(canvas.style,{position:'absolute',inset:'0',display:'block',width:'100%',height:'100%',pointerEvents:'none',borderRadius:'inherit',zIndex:'0'});
+  element.prepend(canvas);
+  let disposed=false;
+  return {
+    canvas,
+    draw(source,width,height,pixelRatio=1,sourceY=0){
+      if(disposed)return;
+      if(![width,height,pixelRatio].every(value=>Number.isFinite(value)&&value>0))throw new RangeError('Card surface dimensions must be finite and positive.');
+      const pixelsWide=Math.max(1,Math.floor(width*pixelRatio)),pixelsHigh=Math.max(1,Math.floor(height*pixelRatio));
+      if(canvas.width!==pixelsWide)canvas.width=pixelsWide;
+      if(canvas.height!==pixelsHigh)canvas.height=pixelsHigh;
+      context.drawImage(source,0,sourceY,pixelsWide,pixelsHigh,0,0,pixelsWide,pixelsHigh);
+      canvas.hidden=false;
+      canvas.style.visibility='visible';
+    },
+    hide(){canvas.hidden=true;canvas.style.visibility='hidden';},
+    dispose(){if(disposed)return;disposed=true;canvas.remove();if(ownsPosition&&element.style.position==='relative')element.style.position=previousPosition;},
+  };
+}
+
 /** Nine read-only views, one WebGL context. The caller owns the frame loop and clock. */
-export async function createCardWorlds(entries) {
+export async function createCardWorlds(entries,{presentation='overlay'}={}) {
   if(!Array.isArray(entries)||entries.some(e=>!e?.id||!e.element||typeof e.getWorld!=='function')||new Set(entries.map(e=>e.id)).size!==entries.length)throw new TypeError('Cards require unique ids, viewport elements and getWorld functions.');
+  if(!['overlay','embedded'].includes(presentation))throw new TypeError('Card presentation must be overlay or embedded.');
+  const embedded=presentation==='embedded';
   const [makeCharacter,atlas]=await Promise.all([
     loadCharacters(),new THREE.TextureLoader().loadAsync('./assets/product-atlas.png'),
   ]);
@@ -75,7 +117,9 @@ export async function createCardWorlds(entries) {
   const canvas=renderer.domElement;
   canvas.className='card-worlds-canvas';canvas.setAttribute('aria-hidden','true');
   Object.assign(canvas.style,{position:'fixed',inset:'0',width:'100vw',height:'100vh',pointerEvents:'none',zIndex:'2'});
-  document.body.append(canvas);
+  // The legacy overlay remains the default for callers with their own stacking
+  // contract. Embedded cards never insert this GL canvas into the document.
+  if(!embedded)document.body.append(canvas);
 
   const geometries={box:new THREE.BoxGeometry(1,1,1),cylinder:new THREE.CylinderGeometry(1,1,1,10),cup:new THREE.CylinderGeometry(1,.73,1,10),plane:new THREE.PlaneGeometry(1,1)};
   const paint=new THREE.MeshLambertMaterial({color:'#ffffff'});
@@ -257,7 +301,7 @@ export async function createCardWorlds(entries) {
     return {scene,camera,map,frame,updateStock,placements,dispose(){scene.traverse(node=>{if(node.isInstancedMesh)node.dispose();});scene.clear();}};
   }
 
-  const cards=entries.map(entry=>({...entry,built:null,world:null,actors:new Map(),ownerActor:null,visible:false,wasVisible:false,lastTime:0,renderedTime:null,renderedRunId:null,renderedAgents:[],renderedOwner:null}));
+  const cards=entries.map(entry=>({...entry,surface:embedded?createEmbeddedCardSurface(entry.element):null,built:null,world:null,actors:new Map(),ownerActor:null,visible:false,wasVisible:false,lastTime:0,renderedTime:null,renderedRunId:null,renderedAgents:[],renderedOwner:null}));
   let disposed=false,width=0,height=0,lastDrawCalls=0;
   function removeActor(card,id,actor){card.built.scene.remove(actor.group,actor.carrier);actor.dispose();card.actors.delete(id);}
   function clearActors(card){
@@ -275,7 +319,7 @@ export async function createCardWorlds(entries) {
         const style=getComputedStyle(node),box=node.getBoundingClientRect();
         info={hidden:node.hidden||style.display==='none'||style.visibility==='hidden'||Number(style.opacity)===0,
           x:/(hidden|clip|scroll|auto)/.test(style.overflowX),y:/(hidden|clip|scroll|auto)/.test(style.overflowY),
-          left:box.left+node.clientLeft,top:box.top+node.clientTop,right:box.left+node.clientLeft+node.clientWidth,bottom:box.top+node.clientTop+node.clientHeight};
+          ...cardClipBox(box,node)};
         cache.set(node,info);
       }
       if(info.hidden)return null;
@@ -286,14 +330,21 @@ export async function createCardWorlds(entries) {
   function render(){
     if(disposed)return;
     const w=window.innerWidth,h=window.innerHeight;
-    if(w!==width||h!==height){width=w;height=h;renderer.setSize(width,height,false);}
+    const cache=new Map(),views=new Map(cards.map(card=>[card,visibility(card,w,h,cache)]));
+    const visible=[...views.values()].filter(view=>view?.scissor);
+    // Allocate once per frame, not once per card. All embedded draws use the
+    // top-left part of a buffer large enough for the largest visible viewport.
+    const bufferWidth=embedded?Math.max(1,...visible.map(view=>Math.ceil(view.rect.width))):w;
+    const bufferHeight=embedded?Math.max(1,...visible.map(view=>Math.ceil(view.rect.height))):h;
+    const pixelRatio=Math.min(globalThis.devicePixelRatio||1,1.5);
+    if(pixelRatio!==renderer.getPixelRatio())renderer.setPixelRatio(pixelRatio);
+    if(bufferWidth!==width||bufferHeight!==height){width=bufferWidth;height=bufferHeight;renderer.setSize(width,height,false);}
     renderer.info.reset();renderer.setScissorTest(false);renderer.setClearColor('#000000',0);renderer.clear(true,true,true);
-    const cache=new Map();
     for(const card of cards){
-      const view=visibility(card,width,height,cache);card.visible=!!view?.scissor;
-      if(!card.visible){card.wasVisible=false;continue;}
+      const view=views.get(card);card.visible=!!view?.scissor;
+      if(!card.visible){card.wasVisible=false;card.surface?.hide();continue;}
       const world=card.getWorld();
-      if(!world?.agents||!world.stock){card.visible=false;card.wasVisible=false;continue;}
+      if(!world?.agents||!world.stock){card.visible=false;card.wasVisible=false;card.surface?.hide();continue;}
       const rebound=card.world!==world,needsScene=!card.built||card.built.map.id!==world.mapId||card.scenario!==world.scenario;
       if(needsScene){if(card.built){clearActors(card);card.built.dispose();}card.built=buildScene(world);card.scenario=world.scenario;}
       else if(rebound)clearActors(card);
@@ -314,9 +365,12 @@ export async function createCardWorlds(entries) {
       if(world.owner&&!card.ownerActor){card.ownerActor=createOwnerVisual(makeCharacter);card.built.scene.add(card.ownerActor.group,card.ownerActor.carrier);}
       const renderedOwner=card.ownerActor?syncOwnerVisual(card.ownerActor,world.owner,world.time,{snap,runId:world.runId}):null;
       card.built.updateStock(world);card.built.frame(view.rect.width/view.rect.height);
-      const viewport=view.viewport,scissor=view.scissor;
+      const viewport=embedded?{x:0,y:height-Math.ceil(view.rect.height),width:Math.ceil(view.rect.width),height:Math.ceil(view.rect.height)}:view.viewport;
+      const scissor=embedded?viewport:view.scissor;
       renderer.setViewport(viewport.x,viewport.y,viewport.width,viewport.height);renderer.setScissor(scissor.x,scissor.y,scissor.width,scissor.height);renderer.setScissorTest(true);
       renderer.setClearColor(card.built.map.theme.background,1);renderer.clear(true,true,true);renderer.render(card.built.scene,card.built.camera);
+      const sourceY=embedded?canvas.height-Math.floor(viewport.y*pixelRatio)-Math.floor(viewport.height*pixelRatio):0;
+      card.surface?.draw(canvas,viewport.width,viewport.height,pixelRatio,sourceY);
       // Record what was actually drawn, not a fresh source-world snapshot later on.
       card.renderedTime=world.time;card.renderedRunId=world.runId;
       card.renderedOwner=renderedOwner;
@@ -335,10 +389,10 @@ export async function createCardWorlds(entries) {
         renderedTheme:card.built?{...card.built.map.theme}:null,renderedProps:card.built?.map.props.map(p=>({...p}))??[],
         renderedPlacements:card.built?.placements.map(p=>({...p,position:[...p.position],visible:(card.world?.stock[p.productId]??0)>0}))??[],
       }:{}),
-    })),renderer:{contexts:1,drawCalls:lastDrawCalls,width,height,pixelRatio:renderer.getPixelRatio()}}),
+    })),renderer:{contexts:1,presentation,drawCalls:lastDrawCalls,width,height,pixelRatio:renderer.getPixelRatio()}}),
     dispose(){
       if(disposed)return;disposed=true;
-      for(const card of cards){if(card.built){clearActors(card);card.built.dispose();}card.visible=false;}
+      for(const card of cards){if(card.built){clearActors(card);card.built.dispose();}card.surface?.dispose();card.visible=false;}
       for(const geometry of Object.values(geometries))geometry.dispose();
       for(const material of materials)material.dispose();for(const texture of textures)texture.dispose();
       renderer.dispose();canvas.remove();
