@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import { simulateComparison, evaluateForecastIntent, FORECAST_ENGINE } from './forecast.js';
+import { simulateComparison, evaluateForecastIntent, FORECAST_ENGINE, simulateComparisonWithJev, replayComparisonWithJev, previewJevRequests } from './forecast.js';
 import { STORES, PRODUCTS, getInventory, getPlacements } from './data.js';
 import { readFile } from 'node:fs/promises';
 import { adaptPersonaRecord, PERSONA_DATASET } from '../demo/personas.js';
@@ -132,6 +132,77 @@ test('full local NVIDIA cohort uses 1,000 distinct source records, not the five 
 });
 
 const constrainedPersona=(id,overrides={})=>({source:{id,dataset:'explicit-constraint-test-fixture',synthetic:true},name:'검사 인물',budget:1600,mission:'생수만 구매',story:'오늘은 생수만 구매합니다.',tags:[],affinity:{meal:.5,drink:.5,snack:.5,health:.5},behavior:{allowProductIds:['water'],priceSensitivity:.8,maxBasket:1},...overrides});
+
+const mockJev=(request,{entered=true,buy=true}={})=>{
+  const options=Object.keys(request.questions.purchase.criteria),choice=buy?(options.find(id=>id!=='none')??'none'):'none';
+  return {model:'typesafe/jev-test',requestId:'test-request',upstreamRequestId:'test-upstream',latencyMs:10,usage:{cost:.00002},
+    answers:{enter:{type:'noul',noul:entered?1:0},purchase:{type:'choice',choice,probabilities:Object.fromEntries(options.map(id=>[id,id===choice?1:0]))}}};
+};
+
+test('hybrid JEV overrides are applied to the same 30-day accounts and reproduce offline exactly',async()=>{
+  const options={...base,populationPerDay:40};let calls=0;
+  const comparison=await simulateComparisonWithJev(options,{decide:async request=>{calls++;return mockJev(request);}});
+  assert.equal(calls,4);assert.equal(comparison.engine.jevCalled,true);
+  assert.deepEqual(comparison.engine.decisionCoverage,{unit:'potential-person-plan-evaluations',jev:4,local:4796,total:4800,apiCalls:4,questionsPerCall:2,selection:'first-chronological-potential-person-on-day-one-shared-across-four-plans',maxJevItemsPerVisit:1});
+  assert.equal(comparison.decisionAudit.length,4);
+  for(const result of [comparison.baseline,...comparison.candidates]){
+    const audit=comparison.decisionAudit.find(item=>item.candidateId===result.candidateId);
+    const visit=result.replay.visits.find(item=>item.decisionSource==='jev');
+    assert.equal(visit.sourceId,audit.sourceId);assert.equal(visit.id,audit.personId);assert.equal(visit.entered,true);
+    assert.deepEqual(visit.decisions.map(item=>item.productId),audit.productId?[audit.productId]:[]);
+    assert.equal(visit.paidAmount,audit.productId?PRODUCTS.find(p=>p.id===audit.productId).price:0);
+    assert.equal(result.revenue,sum(result.replay.timeline.map(item=>item.revenue)));
+    assert.equal(result.revenue,sum(PRODUCTS.map(p=>p.price*result.paidUnitsBySKU[p.id])));
+    assert.equal(result.inputFingerprint,comparison.inputFingerprint);
+    for(const product of PRODUCTS)assert.equal(result.initialInventory.total[product.id]+result.receivedBySKU[product.id],result.paidUnitsBySKU[product.id]+result.finalInventory[product.id]);
+  }
+  assert.deepEqual(replayComparisonWithJev(options,comparison.decisionRecords),comparison);
+  const noEntry=await simulateComparisonWithJev(options,{decide:async request=>mockJev(request,{entered:false})});
+  for(const [index,result] of [noEntry.baseline,...noEntry.candidates].entries()){
+    const visit=result.replay.visits.find(item=>item.decisionSource==='jev');
+    assert.equal(visit.entered,false);assert.equal(visit.paidAmount,0);assert.deepEqual(visit.decisions,[]);
+    assert.equal([comparison.baseline,...comparison.candidates][index].entered,result.entered+1);
+  }
+  assert.notEqual(comparison.inputFingerprint,noEntry.inputFingerprint);
+});
+
+test('JEV receives full source story and exact plan positions, hard constraints and opening stock',async()=>{
+  const catalog=Array.from({length:40},(_,i)=>constrainedPersona(`jev-water-${i}`,{story:'생수만 구매합니다. 원본 서사를 빠뜨리지 마세요.',schedule:{hourlyWeights:Array(24).fill(1)}}));
+  const options={...base,populationPerDay:40,personaCatalog:catalog,inventoryOverrides:{shelfStock:{water:0}}};
+  const requests=previewJevRequests(options);
+  assert.equal(requests.length,4);assert.equal(new Set(requests.map(item=>item.request.state.visit.sourceId)).size,1);
+  assert.ok(requests.every(item=>item.request.state.persona.story==='생수만 구매합니다. 원본 서사를 빠뜨리지 마세요.'));
+  assert.ok(requests.every(item=>item.request.state.persona.schedule.hourlyWeights.length===24));
+  for(const {candidateId,request} of requests){
+    const resultScenario=candidateId==='current'?'hq':{A:'owner',B:'balanced',C:'discovery'}[candidateId];
+    const positions=getPlacements(base.storeId,resultScenario).filter(p=>p.fixtureId==='promo');
+    for(const product of request.state.products){
+      const position=positions.find(p=>p.productId===product.id);
+      assert.deepEqual(product.placement.position,position.position);assert.deepEqual(product.placement.neighbors,position.neighbors);
+      if(product.id!=='water')assert.ok(product.blockedReasons.includes('mission-product-not-allowed'));
+    }
+    assert.ok(request.state.products.find(p=>p.id==='water').stock.shelf>0);
+    assert.ok(Object.keys(request.questions.purchase.criteria).every(id=>id==='none'||id==='water'));
+  }
+  const empty={...options,inventoryOverrides:{totalStock:Object.fromEntries(PRODUCTS.map(p=>[p.id,0]))}};
+  const result=await simulateComparisonWithJev(empty,{decide:async request=>{
+    assert.deepEqual(Object.keys(request.questions.purchase.criteria),['none']);return mockJev(request);
+  }});
+  assert.equal(result.baseline.revenue,0);assert.ok(result.decisionAudit.every(a=>a.productId===null));
+});
+
+test('JEV errors, aborts, or tampered replay records fail without a completed local substitute',async()=>{
+  const options={...base,populationPerDay:5};let calls=0;
+  await assert.rejects(simulateComparisonWithJev(options,{decide:async()=>{calls++;throw new Error('upstream unavailable');}}),/upstream unavailable/);assert.equal(calls,1);
+  const controller=new AbortController();controller.abort();
+  await assert.rejects(simulateComparisonWithJev(options,{signal:controller.signal,decide:async()=>{calls++;}}));assert.equal(calls,1);
+  const mid=new AbortController();
+  await assert.rejects(simulateComparisonWithJev(options,{signal:mid.signal,decide:async request=>{mid.abort();return mockJev(request);}}));
+  const valid=await simulateComparisonWithJev(options,{decide:async request=>mockJev(request)});
+  const records=structuredClone(valid.decisionRecords);records[0].contextFingerprint='tampered';
+  assert.throws(()=>replayComparisonWithJev(options,records),/일치/);
+  await assert.rejects(simulateComparisonWithJev(options,{decide:async request=>({...mockJev(request),model:'openai/gpt-4o'})}),/JEV가 아닌/);
+});
 
 test('source-person budgets and water-only goals are causal, including the former 1,600-won failure', () => {
   const catalog=Array.from({length:100},(_,i)=>constrainedPersona(`water-${i}`));

@@ -2,6 +2,7 @@ import { PRODUCTS, PRODUCT_MAP, PROFILES, randomAt } from '../demo/model.js';
 import { HOURLY_PROFILES, splitDayInventory } from '../demo/day.js';
 import { deriveBehavior, productPolicy } from '../demo/behavior.js';
 import { getBay, getStore, getInventory, getPlacements } from './data.js';
+import { JEV_HYBRID_ENGINE, buildJevDecisionRequest, applyJevDecision, decisionFingerprint } from './jev-decision.js';
 
 export const FORECAST_ENGINE = Object.freeze({
   id: 'local-analytic-30day-v2', type: 'local-analytic', version: 2,
@@ -144,7 +145,8 @@ function runScenario(config, cohort, scenario, candidateId, name) {
     const row = { day, potential: config.populationPerDay, uniquePersonaCount:config.selected?config.selected.length:5, cohortKey: `${config.cohortKey}:${day}`, ...Object.fromEntries(Object.keys(totals).map(key => [key,0])), paidUnitsBySKU: zeroSKU(), receivedBySKU: zeroSKU(), stockoutBySKU: zeroSKU(), openingInventory: Object.fromEntries(PRODUCTS.map(p => [p.id,shelf[p.id]+backroom[p.id]])), eventIds: events.map(e => e.id), events };
     for (let hour = 0; hour < 24; hour++) {
       const hourPeople = people.filter(person => person.hour === hour);
-      const entrants = hourPeople.filter(person => person.entered);
+      const override = config.decisionOverrides?.[candidateId];
+      const entrants = hourPeople.filter(person => override?.personId===person.id ? override.applied.entered : person.entered);
       // Sample by the shared cohort, never by purchase outcome or candidate.
       const sampledPersonId = entrants[0]?.id;
       const before = Object.fromEntries(LEDGER_METRICS.map(key => [key,row[key]]));
@@ -164,7 +166,8 @@ function runScenario(config, cohort, scenario, candidateId, name) {
       for (const person of entrants) {
         row.entered++;
         const {profile,behavior,policies} = person.compiled;
-        const sampled = person.id === sampledPersonId;
+        const jev = override?.personId===person.id ? override.applied : null;
+        const sampled = person.id === sampledPersonId || Boolean(jev);
         const visibleProductIds = sampled ? [] : null, decisions = sampled ? [] : null;
         const desired = PRODUCTS.map((product,index) => {
           const position = positions[product.id];
@@ -173,14 +176,14 @@ function runScenario(config, cohort, scenario, candidateId, name) {
           const visible = person.random(14100 + index) < position.visibility;
           if (sampled && visible) visibleProductIds.push(product.id);
           const wants = person.random(14200 + index) < intent.probability;
-          return { product, index, eventFactor, wants: visible && wants && intent.allowed, priority: intent.priority + person.random(14300 + index) * .55 };
+          return { product, index, eventFactor, wants: jev ? product.id===jev.productId : visible && wants && intent.allowed, priority: intent.priority + person.random(14300 + index) * .55 };
         }).filter(item => item.wants).sort((a,b) => b.priority-a.priority || a.product.id.localeCompare(b.product.id));
         let spent = 0, paidUnits = 0, attempts = 0; const basket=[];
         for (const { product, index, eventFactor } of desired) {
           if (attempts >= person.maxUnits) break;
           if (spent + product.price > person.budget) continue;
           const intent=evaluateForecastIntent(profile,product,{behavior,spent,basket,eventFactor});
-          if(!intent.allowed||person.random(14200+index)>=intent.probability)continue;
+          if(!intent.allowed||(jev?false:person.random(14200+index)>=intent.probability))continue;
           attempts++; row.purchaseDemand++;
           const id = product.id;
           const recordedDecision = sampled ? { productId:id, price:product.price, quantity:1,
@@ -209,8 +212,15 @@ function runScenario(config, cohort, scenario, candidateId, name) {
           second:(day-1)*86400+hour*3600+1800, budget:person.budget,
           paidAmount:spent, paidUnits, visibleProductIds, decisions,
           eventIds:person.activeEvents.map(event=>event.id),
+          ...(jev?{decisionSource:'jev',entered:true,decisionAuditId:override.auditId}:{}),
         });
       }
+      const skippedJevPerson=override&&!override.applied.entered?hourPeople.find(person=>person.id===override.personId):null;
+      if(skippedJevPerson)visits.push({id:skippedJevPerson.id,day,hour,sourceId:skippedJevPerson.sourceId,
+        profileIndex:skippedJevPerson.profileIndex,name:skippedJevPerson.compiled.profile.name??'합성 방문자',
+        second:(day-1)*86400+hour*3600+1800,budget:skippedJevPerson.budget,paidAmount:0,paidUnits:0,
+        visibleProductIds:[...override.applied.visibleProductIds],decisions:[],eventIds:skippedJevPerson.activeEvents.map(event=>event.id),
+        entered:false,decisionSource:'jev',decisionAuditId:override.auditId});
       const hourTotals = Object.fromEntries(LEDGER_METRICS.map(key => [key,row[key]-before[key]]));
       cumulative.potential += hourPeople.length;
       for (const key of LEDGER_METRICS) cumulative[key] += hourTotals[key];
@@ -235,18 +245,22 @@ function runScenario(config, cohort, scenario, candidateId, name) {
     paidUnitsBySKU, receivedBySKU, stockoutBySKU, daily, positions, costs,
     initialInventory: structuredClone(config.inventory), finalShelf: shelf, finalBackroom: backroom,
     finalInventory: Object.fromEntries(PRODUCTS.map(p => [p.id,shelf[p.id]+backroom[p.id]])), warnings,
-    inputFingerprint: config.inputFingerprint, engine: FORECAST_ENGINE.id, personaSource:config.personaSource.dataset,
+    inputFingerprint: config.inputFingerprint, engine: config.decisionOverrides?JEV_HYBRID_ENGINE.id:FORECAST_ENGINE.id, personaSource:config.personaSource.dataset,
     replay:{version:1,source:'same-forecast-ledger',days:config.days,binSeconds:3600,
-      cohortKey:config.cohortKey,representation:'one-recorded-entrant-per-hour',
+      cohortKey:config.cohortKey,representation:config.decisionOverrides?'one-recorded-entrant-per-hour-plus-JEV-subject':'one-recorded-entrant-per-hour',
       timing:'hour-resolved; center-second is a display anchor, travel is interpolation',
       accounting:'all visits in hourly bins; detailed sample visits are not the accounting total',
-      synthetic:true,jevCalled:false,timeline,visits},
+      synthetic:true,jevCalled:Boolean(config.decisionOverrides),timeline,visits},
   };
 }
 
 /** Deterministic local computation. No network, model calls, order, or state mutation. */
 export function simulateComparison(options = {}) {
   const config = configFor(options), cohort = buildCohort(config);
+  return compareScenarios(config,cohort);
+}
+
+function compareScenarios(config,cohort) {
   const baseline = runScenario(config, cohort, 'hq', 'current', '현재 진열 · 본사 표준안');
   baseline.deltaPercent = 0; baseline.profitDelta = 0;
   const candidates = config.bay.candidates.map(candidate => {
@@ -255,14 +269,89 @@ export function simulateComparison(options = {}) {
       profitDelta: result.profit-baseline.profit, revenueDelta: result.revenue-baseline.revenue,
       stockoutRateDelta: result.stockoutRate-baseline.stockoutRate };
   });
-  const engine = { ...FORECAST_ENGINE, personaSource: config.personaSource.dataset };
+  const engine = { ...(config.decisionOverrides?JEV_HYBRID_ENGINE:FORECAST_ENGINE), personaSource: config.personaSource.dataset };
   const assumptions = [...FORECAST_ASSUMPTIONS];
   if(config.selected)assumptions[1]=`매일 동일한 원본 합성 페르소나 ${config.selected.length.toLocaleString('ko-KR')}명의 방문 기회를 다시 샘플링합니다. 원본 ID·서사 기반의 기존 어댑터 예산·선호·목적·기피·기억·가격 민감도를 사용하되, 제한된 로컬 규칙이며 JEV나 일반 언어 이해를 실행하지 않습니다.`;
   assumptions.push('방문 시간은 페르소나의 합성 시간대 가중치를 사용합니다. 수업·출퇴근 등 실제 활동을 추정하지 않으며, 날이 바뀌면 예산·방문 필요를 새로 가정합니다. 과거 방문 결과를 다음 날 기억에 누적하지 않습니다.');
+  if(config.decisionOverrides){
+    const total=config.populationPerDay*config.days*4;
+    engine.decisionCoverage={unit:'potential-person-plan-evaluations',jev:4,local:total-4,total,apiCalls:4,questionsPerCall:2,
+      selection:'first-chronological-potential-person-on-day-one-shared-across-four-plans',maxJevItemsPerVisit:1};
+    assumptions[1]=`각 안의 첫날 첫 잠재 고객 1명씩 총 4건만 JEV가 입장 여부와 조건부 상품 1개 선택을 판단합니다. 전체 ${total.toLocaleString('ko-KR')}건 중 나머지 ${(total-4).toLocaleString('ko-KR')}건은 기존 로컬 규칙입니다. 전 고객 JEV 시뮬레이션이 아닙니다.`;
+    assumptions.push('JEV가 반환한 입장 확률과 상품 분포를 같은 시드 난수로 샘플링합니다. 원본 응답·실제 모델·적용 선택을 기록하며 오류 시 로컬 판단으로 숨겨 대체하지 않습니다.');
+  }
   return { storeId: config.storeId, bayId: config.bayId, completed: true, days: 30,
     baseline, candidates, engine, assumptions, personaSource:config.personaSource,
     cohortKey: config.cohortKey, inputFingerprint: config.inputFingerprint,
     inputs: { populationPerDay: config.populationPerDay, seed: config.store.seed, delivery: { ...config.delivery }, replenishmentEnabled: config.replenishmentEnabled, initialInventory: structuredClone(config.inventory), mapId: config.store.mapId, fixtureId: config.bay.fixtureId },
     metricDefinitions: { revenue: '대상 24 SKU · 30일 가상 결제매출(원)', profit: '대상 24 SKU · 30일 가상 매출총이익(원)', stockoutRate: '미충족 구매 수량 / 구매 시도 수량(0~1)', deltaPercent: '현재안 대비 가상 결제매출 변화율(%)' },
+    ...(config.decisionOverrides?{decisionAudit:config.decisionAudit,decisionRecords:config.decisionRecords}:{}),
   };
+}
+
+function jevRequests(config,cohort) {
+  const person=cohort[0].people[0],inventory=structuredClone(config.inventory);
+  // No customer precedes this subject. Only opening replenishment can happen;
+  // repeated checks in empty hours cannot change it after this first transfer.
+  if(config.replenishmentEnabled)for(const product of PRODUCTS){
+    const id=product.id;
+    if(inventory.shelf[id]<=inventory.capacity[id]*.35){const qty=Math.min(inventory.capacity[id]-inventory.shelf[id],inventory.backroom[id]);inventory.shelf[id]+=qty;inventory.backroom[id]-=qty;}
+  }
+  return [{scenario:'hq',id:'current'},...config.bay.candidates].map(({scenario,id})=>({
+    candidateId:id,person,
+    request:buildJevDecisionRequest({config,person,positions:placementScores(config,scenario),inventory,scenario,candidateId:id}),
+  }));
+}
+
+/** Read-only preview for cost estimates; no API or forecast execution. */
+export function previewJevRequests(options={}) {
+  const config=configFor(options),cohort=buildCohort(config);
+  return jevRequests(config,cohort).map(({candidateId,request})=>({candidateId,request,contextFingerprint:decisionFingerprint(request)}));
+}
+
+function applyJevRecords(config,cohort,records) {
+  const targets=jevRequests(config,cohort);
+  if(!Array.isArray(records)||records.length!==targets.length)throw new TypeError('4개 안의 JEV 원본 판단 기록이 필요합니다.');
+  config.decisionOverrides={};config.decisionAudit=[];config.decisionRecords=structuredClone(records);
+  for(const [index,{candidateId,person,request}] of targets.entries()){
+    const record=records[index],contextFingerprint=decisionFingerprint(request);
+    if(record.candidateId!==candidateId||record.contextFingerprint!==contextFingerprint)throw new TypeError('JEV 기록의 점포·페르소나·재고·진열 입력이 일치하지 않습니다.');
+    const applied=applyJevDecision(request,record.response,{entryDraw:person.random(14600),purchaseDraw:person.random(14601)});
+    const auditId=`${config.storeId}:${candidateId}:${person.id}:${contextFingerprint}`;
+    config.decisionOverrides[candidateId]={personId:person.id,applied,auditId};
+    const response=record.response;
+    config.decisionAudit.push({id:auditId,candidateId,sourceId:person.sourceId,personId:person.id,day:1,hour:person.hour,
+      ...applied,model:response.model,requestId:response.requestId??null,upstreamRequestId:response.upstreamRequestId??null,
+      latencyMs:response.latencyMs??null,usage:response.usage??null,provider:response.provider??null,cached:response.cached===true,
+      applied:true,contextFingerprint,contextSummary:{budget:person.budget,eligibleProductIds:[...request.state.eligibility.eligibleProductIds],
+        visibleProductIds:[...request.state.eligibility.visibleProductIds],mission:request.state.persona.mission,
+        sourceDataset:request.state.persona.source?.dataset??'authored-five-profile-fixture',eventIds:person.activeEvents.map(event=>event.id)}});
+  }
+  config.inputFingerprint=decisionFingerprint({localInput:config.inputFingerprint,decisionRecords:records});
+  return compareScenarios(config,cohort);
+}
+
+/** Offline reproduction consumes recorded, validated JEV answers; no API. */
+export function replayComparisonWithJev(options={},decisionRecords) {
+  const config=configFor(options),cohort=buildCohort(config);
+  return applyJevRecords(config,cohort,decisionRecords);
+}
+
+/** Deliberately bounded hybrid: 4 calls/store, never an undisclosed local fallback. */
+export async function simulateComparisonWithJev(options={}, {decide,onProgress,signal}={}) {
+  if(typeof decide!=='function')throw new TypeError('JEV Decisions 호출 함수가 필요합니다.');
+  const checkAbort=()=>{if(signal?.aborted)throw signal.reason??new DOMException('JEV 계산을 취소했습니다.','AbortError');};
+  checkAbort();
+  const config=configFor(options),cohort=buildCohort(config),records=[];
+  const targets=jevRequests(config,cohort);
+  for(const {candidateId,person,request} of targets){
+    checkAbort();
+    onProgress?.({storeId:config.storeId,candidateId,completed:records.length,total:targets.length,status:'requesting'});
+    const response=await decide(request,{signal});checkAbort();
+    // Validate immediately before making the next paid request.
+    applyJevDecision(request,response,{entryDraw:person.random(14600),purchaseDraw:person.random(14601)});
+    records.push({candidateId,contextFingerprint:decisionFingerprint(request),response:structuredClone(response)});
+    onProgress?.({storeId:config.storeId,candidateId,completed:records.length,total:targets.length,status:'received'});
+  }
+  checkAbort();return applyJevRecords(config,cohort,records);
 }

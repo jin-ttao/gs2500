@@ -73,62 +73,132 @@ function positionOn(path,amount,length){
 }
 
 function visualAgent(track,time){
-  const local=time-track.start;if(local<0||local>=track.duration)return null;
+  const local=(time-track.start)/track.displayDuration*track.duration;if(local<0||local>=track.duration)return null;
   const phase=track.phases.find(item=>local<item.end)??track.phases.at(-1);
   const pose=positionOn(phase.path,(local-phase.start)/phase.duration,phase.length);
+  // Position still follows the fast recorded track. Use a legible absolute
+  // gait clock instead of feeding the rig the 28x world clock (which aliased
+  // at normal display frame rates). This is deterministic on pause/seek/rebind.
+  const gaitPhase=(Math.abs(Number(track.visit.id)||0)%17)/17;
+  const presentationAnimationTime=phase.state==='walking'?(time-track.start)*2+gaitPhase:local-phase.start;
   return {id:track.visit.id,position:pose.position,heading:phase.heading??pose.heading,
     state:phase.state,stateTime:local-phase.start,reachLevel:phase.reachLevel??2,
     basket:phase.basket.map(id=>PRODUCT_MAP[id]),speed:1.25,velocity:phase.state==='walking'?1.25:0,
     sourceId:track.visit.sourceId,recordedHour:track.visit.hour,productId:phase.productId??null,
-    presentationOnly:true};
+    recordedDay:track.visit.day,presentationOnly:true,presentationAnimationTime};
 }
 
-/** Read-only view of the same forecast ledger; never evaluates a new decision. */
-export function createLedgerReplay(entries,{day=1,duration=48}={}){
+export const PERIOD_REPLAY_SECONDS=45;
+const METRICS=['potential','revenue','profit','paidUnits','payments','entered','purchaseDemand','stockoutDemand','shelfGapDemand','totalStockoutDemand','replenishedUnits','receivedUnits','skipped'];
+const emptyTotals=()=>Object.fromEntries(METRICS.map(key=>[key,0]));
+const stockTotal=stock=>Object.values(stock).reduce((sum,value)=>sum+value,0);
+
+function prepareLedger(result){
+  if(result?.replay?.source!=='same-forecast-ledger'||!Array.isArray(result.daily)||!result.daily.length||!Array.isArray(result.replay.timeline)||!result.replay.timeline.length||!Array.isArray(result.replay.visits))throw new TypeError('동일 계산에서 생성한 기록만 재생할 수 있습니다.');
+  const timeline=result.replay.timeline;
+  let end=0,totals=emptyTotals();const checkpoints=[];
+  for(const bin of timeline){
+    if(!Number.isFinite(bin.startSecond)||!Number.isFinite(bin.endSecond)||bin.startSecond<end||bin.endSecond<=bin.startSecond||!bin.shelfStock||!bin.backroomStock)throw new TypeError('시간 구간과 재고가 유효한 기록이 필요합니다.');
+    end=bin.endSecond;
+    for(const key of METRICS){
+      const value=key==='skipped'?(bin.skipped??bin.potential-bin.entered):(bin[key]??0);
+      if(!Number.isFinite(value)||(key!=='profit'&&value<0))throw new TypeError('계산 기록의 수치는 유효해야 하며 수량·매출은 음수가 될 수 없습니다.');
+      totals[key]+=value;
+    }
+    checkpoints.push({...totals});
+  }
+  const visits=new Map();
+  for(const visit of result.replay.visits){
+    if(visit.entered===false)continue;
+    if(!Number.isInteger(visit.day)||visit.day<1||visit.day>result.daily.length||!Number.isFinite(visit.hour)||visit.hour<0||visit.hour>=24||!Array.isArray(visit.decisions)||!Array.isArray(visit.visibleProductIds))throw new TypeError('대표 방문의 날짜·상품 기록이 올바르지 않습니다.');
+    if(!visits.has(visit.day))visits.set(visit.day,[]);
+    visits.get(visit.day).push(visit);
+  }
+  for(const list of visits.values())list.sort((a,b)=>a.hour-b.hour||a.id-b.id);
+  return {timeline,checkpoints,visits,end};
+}
+
+function completedIndex(timeline,second){
+  let low=0,high=timeline.length;
+  while(low<high){const mid=Math.floor((low+high)/2);if(timeline[mid].endSecond<=second+1e-7)low=mid+1;else high=mid;}
+  return low-1;
+}
+
+/** One read-only clock for the entire period. Hourly records settle atomically;
+ * there is no invented within-hour revenue, and 3D never makes new decisions. */
+export function createLedgerReplay(entries,{day=1,duration=PERIOD_REPLAY_SECONDS}={}){
   if(!Array.isArray(entries)||!entries.length||!Number.isFinite(duration)||duration<=0)throw new TypeError('계산 기록과 유효한 재생 시간이 필요합니다.');
   const rows=entries.map(entry=>{
-    if(entry.result?.replay?.source!=='same-forecast-ledger')throw new TypeError('동일 계산에서 생성한 기록만 재생할 수 있습니다.');
+    const ledger=prepareLedger(entry.result);
     const world={mapId:entry.mapId,scenario:entry.result.scenario,runId:`ledger:${entry.id}`,time:0,agents:[],owner:null,
       stock:clone(entry.result.initialInventory.shelf),initialStock:clone(entry.result.initialInventory.shelf),backroomStock:clone(entry.result.initialInventory.backroom)};
-    return {...entry,world,tracks:[],days:new Map(),checkpoint:null};
+    return {...entry,ledger,world,tracks:[],days:new Map(),checkpoint:null,checkpointIndex:-2,cumulative:emptyTotals(),dayCumulative:emptyTotals()};
   });
-  const replay={day:1,elapsed:0,duration,progress:0,hour:0,speed:1,running:true,isComplete:false,worlds:new Map(rows.map(row=>[row.id,row.world]))};
+  const totalSeconds=rows[0].ledger.end,dayCount=rows[0].result.daily.length;
+  if(rows.some(row=>row.ledger.end!==totalSeconds||row.result.daily.length!==dayCount)||new Set(rows.map(row=>row.id)).size!==rows.length)throw new TypeError('같은 기간의 고유한 비교 기록이 필요합니다.');
+  const replay={day:1,dayCount,elapsed:0,duration,totalSeconds,simulatedSecond:0,progress:0,dayProgress:0,hour:0,speed:1,running:true,isComplete:false,worlds:new Map(rows.map(row=>[row.id,row.world]))};
+  function tracksForDay(row,value){
+    if(!row.days.has(value)){
+      const available=row.ledger.visits.get(value)??[];
+      const selected=available.length<=12?available:Array.from({length:12},(_,index)=>available[Math.round(index*(available.length-1)/11)]);
+      const dayDuration=duration/dayCount;
+      row.days.set(value,selected.map(visit=>{
+        const track=makeTrack(row.result,visit,row.mapId);
+        // A compressed display window is anchored to this recorded hour. It
+        // can overlap nearby sampled visits but contributes no accounting.
+        track.displayDuration=Math.min(dayDuration*.78,1.15);
+        const second=(visit.day-1)*86400+(visit.hour+.5)*3600;
+        const anchor=second/totalSeconds*duration;
+        track.start=clamp(anchor-track.displayDuration*.45,0,Math.max(0,duration-track.displayDuration));
+        return track;
+      }));
+    }
+    return row.days.get(value);
+  }
   function update(){
-    replay.progress=clamp(replay.elapsed/replay.duration,0,1);replay.hour=Math.min(23,Math.floor(replay.progress*24));
+    replay.progress=clamp(replay.elapsed/replay.duration,0,1);replay.simulatedSecond=replay.progress*totalSeconds;
+    // The same integer clock must select the day AND the closed ledger bin.
+    // 11/30 * 30 days can otherwise land a fraction below day twelve.
+    if(Math.abs(replay.simulatedSecond-Math.round(replay.simulatedSecond))<1e-7)replay.simulatedSecond=Math.round(replay.simulatedSecond);
     replay.isComplete=replay.progress===1;
+    replay.day=Math.min(dayCount,Math.floor(replay.simulatedSecond/86400)+1);
+    replay.dayProgress=replay.isComplete?1:(replay.simulatedSecond%86400)/86400;
+    replay.hour=replay.isComplete?24:Math.floor(replay.dayProgress*24);
     for(const row of rows){
-      const bins=row.result.replay.timeline.filter(bin=>bin.day===replay.day);
-      const completedHours=Math.floor(replay.progress*24),checkpoint=bins[completedHours-1];
-      if(checkpoint!==row.checkpoint){
-        row.checkpoint=checkpoint;
-        const prior=replay.day===1?null:row.result.daily[replay.day-2];
-        row.world.stock=clone(checkpoint?.shelfStock??prior?.shelfStock??row.result.initialInventory.shelf);
-        row.world.backroomStock=clone(checkpoint?.backroomStock??prior?.backroomStock??row.result.initialInventory.backroom);
+      const index=completedIndex(row.ledger.timeline,replay.simulatedSecond),checkpoint=row.ledger.timeline[index]??null;
+      if(index!==row.checkpointIndex){
+        row.checkpointIndex=index;row.checkpoint=checkpoint;
+        row.cumulative={...(row.ledger.checkpoints[index]??emptyTotals())};
+        row.world.stock=clone(checkpoint?.shelfStock??row.result.initialInventory.shelf);
+        row.world.backroomStock=clone(checkpoint?.backroomStock??row.result.initialInventory.backroom);
       }
-      row.world.time=replay.elapsed;row.world.day=replay.day;
-      row.world.agents=replay.isComplete?[]:row.tracks.map(track=>visualAgent(track,replay.elapsed)).filter(Boolean);
+      const dayStart=completedIndex(row.ledger.timeline,(replay.day-1)*86400),prior=row.ledger.checkpoints[dayStart]??emptyTotals();
+      row.dayCumulative=Object.fromEntries(METRICS.map(key=>[key,row.cumulative[key]-prior[key]]));
+      row.world.time=replay.elapsed*28;row.world.day=replay.day;row.world.hour=replay.hour;
+      row.world.cumulative={...row.cumulative};
+      row.tracks=[replay.day-1,replay.day,replay.day+1].filter(value=>value>=1&&value<=dayCount).flatMap(value=>tracksForDay(row,value));
+      row.world.agents=replay.isComplete||replay.elapsed===0?[]:row.tracks.map(track=>visualAgent(track,replay.elapsed)).filter(Boolean);
     }
   }
-  replay.setDay=value=>{
-    if(!Number.isInteger(value)||value<1||value>30)throw new RangeError('재생일은 1~30일입니다.');
-    replay.day=value;replay.elapsed=0;replay.isComplete=false;
-    let longest=duration;
-    for(const row of rows){
-      if(!row.days.has(value)){
-        const available=row.result.replay.visits.filter(visit=>visit.day===value);
-        const selected=available.length<=12?available:Array.from({length:12},(_,index)=>available[Math.round(index*(available.length-1)/11)]);
-        row.days.set(value,selected.map(visit=>makeTrack(row.result,visit,row.mapId)));
-      }
-      row.tracks=row.days.get(value);row.checkpoint=null;
-      longest=Math.max(longest,...row.tracks.map(track=>track.duration+8));
-    }
-    replay.duration=longest;
-    for(const row of rows)row.tracks.forEach((track,index)=>{track.start=row.tracks.length<=1?0:index/(row.tracks.length-1)*(replay.duration-track.duration);});
-    update();return replay;
-  };
   replay.seek=progress=>{if(!Number.isFinite(progress)||progress<0||progress>1)throw new RangeError('재생 위치는 0~1입니다.');replay.elapsed=replay.duration*progress;update();return replay;};
-  replay.setSpeed=value=>{if(![.5,1,2].includes(value))throw new RangeError('재생 배속은 0.5, 1, 2입니다.');replay.speed=value;return replay;};
-  replay.advance=seconds=>{if(!Number.isFinite(seconds)||seconds<0)throw new RangeError('시간 간격을 확인해주세요.');if(replay.running&&!replay.isComplete){replay.elapsed=Math.min(replay.duration,replay.elapsed+seconds*replay.speed);update();}return replay;};
-  replay.getRow=id=>{const row=rows.find(item=>item.id===id);if(!row)throw new RangeError('없는 기록입니다.');return {day:row.result.daily[replay.day-1],sampleCount:row.tracks.length,checkpoint:row.checkpoint,visits:row.tracks.map(track=>track.visit),world:row.world};};
+  replay.seekDay=(value,progress=0)=>{
+    if(!Number.isInteger(value)||value<1||value>dayCount||!Number.isFinite(progress)||progress<0||progress>1)throw new RangeError(`재생일은 1~${dayCount}일, 일자 내 위치는 0~1입니다.`);
+    return replay.seek(clamp(((value-1+progress)*86400)/totalSeconds,0,1));
+  };
+  replay.setDay=value=>replay.seekDay(value);
+  replay.setSpeed=value=>{if(![.5,1,2,4].includes(value))throw new RangeError('재생 배속은 0.5, 1, 2, 4입니다.');replay.speed=value;return replay;};
+  replay.pause=()=>{replay.running=false;return replay;};
+  replay.play=()=>{if(!replay.isComplete)replay.running=true;return replay;};
+  // An explicit reset must stay visibly at zero until the user starts again.
+  // Otherwise the next hourly bin arrives in ~60ms and looks like no reset.
+  replay.restart=()=>{replay.pause();replay.seek(0);return replay;};
+  replay.advance=seconds=>{if(!Number.isFinite(seconds)||seconds<0)throw new RangeError('시간 간격을 확인해주세요.');if(replay.running&&!replay.isComplete){const next=replay.elapsed+seconds*replay.speed;replay.elapsed=next>=replay.duration-1e-9?replay.duration:next;update();}return replay;};
+  replay.getRow=id=>{const row=rows.find(item=>item.id===id);if(!row)throw new RangeError('없는 기록입니다.');return {
+    day:row.result.daily[replay.day-1],sampleCount:tracksForDay(row,replay.day).length,
+    checkpoint:row.checkpoint,completedBins:row.checkpointIndex+1,
+    cumulative:{...row.cumulative},dayCumulative:{...row.dayCumulative},
+    stock:{shelf:stockTotal(row.world.stock),backroom:stockTotal(row.world.backroomStock)},
+    visits:row.tracks.map(track=>track.visit),dayVisits:tracksForDay(row,replay.day).map(track=>track.visit),world:row.world,
+  };};
   replay.setDay(day);return replay;
 }

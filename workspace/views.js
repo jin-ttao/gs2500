@@ -1,5 +1,7 @@
 // Presentation-only views. All forecasts, identities and approval state come
 // from the shared workflow contract; this module never generates performance.
+import {icon} from './ui.js';
+import {renderOperationsOverview,renderOperationsHistory,renderRecommendations,renderEvidence,renderObservationDialog,renderSearchDialog} from './operations-view.js';
 const escape = value => String(value ?? '').replace(/[&<>"']/g, char => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[char]));
 const number = value => value != null && Number.isFinite(Number(value)) ? Number(value).toLocaleString('ko-KR', {maximumFractionDigits: 1}) : '—';
 const percent = value => value != null && Number.isFinite(Number(value)) ? `${Number(value) > 0 ? '+' : ''}${Number(value).toFixed(1)}%` : '—';
@@ -38,25 +40,33 @@ function changes(vm) {
 function shell(vm, content) {
   const owner = vm.route === 'owner';
   const simulation = ['bays','bay','board','candidate'].includes(vm.route);
-  const nav = (name,route,active) => button(`<span class="nav-dot"></span>${name}`,'navigate',{className:`nav-item ${active ? 'active' : ''}`,data:{route}});
-  return `<div class="app-shell">
-    <aside class="sidebar" aria-label="주 메뉴">
-      ${button(logo,'navigate',{className:'brand-button',data:{route:owner?'owner':'home'}})}
-      <div class="workspace-name">${owner ? 'STORE WORKSPACE' : 'MANAGER WORKSPACE'}</div>
-      <nav>${owner ? nav('매니저 제안','owner',true) : `${nav('홈','home',vm.route==='home')}${nav('진열 시뮬레이션','bays',simulation)}${nav('4주 회고','review',vm.route==='review')}`}
-        ${['발주 조정','행사 배정','현장 지원'].map(name => `<div class="nav-item unavailable" aria-disabled="true"><span class="nav-dot"></span>${name}<span class="not-built">미구현</span></div>`).join('')}
-      </nav>
-      ${!owner && simulation ? `<div class="side-proposals">${small('오늘의 제안')}${vm.bays.map(bay => button(`<strong>${escape(storeOf(vm,bay)?.name)}</strong><span>${escape(bay.name)}</span>`,'select-bay',{className:`side-proposal ${vm.bay?.id===bay.id && vm.store?.id===bay.storeId?'active':''}`,data:dataFor(bay)})).join('')}</div>` : ''}
-      <div class="side-account">${small(owner?'합성 점주 계정':'담당 매니저')}<strong>${owner ? escape(vm.approval ? vm.store?.name+' 점주' : '점주 데모') : '김 매니저'}</strong><span class="muted mono">${owner ? escape(vm.approval?.storeId ?? '승인 대기') : `${vm.stores.length}개 합성 점포`}</span></div>
-      <div class="sidebar-bottom"><span class="demo-dot"></span> HACKATHON DEMO<br><span>실제 GS25 시스템과 미연결</span>${button('데모 초기화','reset-demo',{className:'text-button muted'})}</div>
+  const operations = ['home','operations','recommendations','evidence'].includes(vm.route);
+  const nav = (name,route,active,glyph='home') => button(`${icon(glyph)}${name}`,'navigate',{className:`nav-item ${active ? 'active' : ''}`,data:{route}});
+  // AppLayout / AppSidebar port: fixed 200px rail and one page scroll host.
+  return `<div class="app-shell" data-sidebar-collapsed="${Boolean(vm.sidebarCollapsed)}" data-mobile-sidebar-open="${Boolean(vm.mobileSidebarOpen)}">
+    <button type="button" class="ob-sidebar-scrim" data-action="close-sidebar" aria-label="메뉴 닫기" tabindex="-1"></button>
+    <aside class="sidebar" id="workspace-sidebar" aria-label="주 메뉴">
+      <div class="ob-sidebar-header">${button('<span class="ob-brand-mark">G</span><span>GS2500</span>','navigate',{className:'brand-button',data:{route:owner?'owner':'home'}})}<button type="button" class="ob-collapse-button" data-action="toggle-sidebar" aria-label="사이드바 접기" aria-controls="workspace-sidebar" aria-expanded="${!vm.sidebarCollapsed}">${icon('panel-left')}</button></div>
+      <div class="ob-sidebar-content">
+      ${!owner?button(icon('search')+'<span>점포와 화면 찾기</span><kbd>⌘ K</kbd>','open-search',{className:'search-trigger'}):''}
+      <nav aria-label="워크스페이스">${owner ? nav('매니저 제안','owner',true,'layers') : `${nav('점포 운영','home',operations,'home')}${nav('진열 시뮬레이션','board',simulation,'layers')}${nav('담당 점포 실적','portfolio',vm.route==='portfolio','chart')}${nav('4주 회고','review',vm.route==='review','history')}`}</nav>
+      ${!owner?`<div class="nav-section-label">담당 점포 <span>${vm.stores.length}</span></div><div class="sidebar-stores">${vm.stores.map(s=>button(`${icon('store',{size:15})}<span>${escape(s.name)}</span><i class="store-state ${s.yoy<0?'attention':''}" aria-label="${s.yoy<0?'실적 검토 필요':'실적 유지'}"></i>`,'ops-store',{className:`store-nav ${s.id===vm.store?.id&&operations?'active':''}`,data:{store:s.id}})).join('')}</div>`:''}
+      </div>
+      <div class="ob-sidebar-footer"><div class="ob-live-strip"><span><i class="demo-dot"></i> LOCAL DEMO</span><div><span>담당 점포 <b>${vm.stores.length}</b></span><span>승인 <b>${Object.keys(vm.state?.approvals??{}).length}</b></span></div></div>
+      <div class="ob-account-row"><span class="ob-account-avatar">${owner?'점':'김'}</span><div><strong>${owner?'점주 데모':'김 매니저'}</strong><small>${owner?escape(vm.store?.name??'승인 대기'):'강남 운영 워크스페이스'}</small></div><button type="button" class="ob-reset-button" data-action="reset-demo" aria-label="데모 초기화" title="데모 초기화">${icon('settings',{size:15})}</button></div><span class="ob-local-note">실제 시스템 미연결 · 새로고침 시 초기화</span></div>
     </aside>
     <main class="main" id="main-content">
-      <header class="topbar"><div class="assistant-note"><span class="assistant-mark" aria-hidden="true">G</span><span>${escape(topline(vm))}</span></div><div class="topbar-actions">${badge(SYNTHETIC,'synthetic')}${button(owner?'데모 · 매니저 화면':'데모 · 점주 화면',owner?'role-manager':'role-owner',{className:'role-button'})}</div></header>
+      <div class="ob-page-scroll" tabindex="-1">
+      <header class="topbar"><div class="assistant-note"><button type="button" class="ob-sidebar-reopen" data-action="toggle-sidebar" aria-label="사이드바 펼치기" aria-controls="workspace-sidebar" aria-expanded="${!vm.sidebarCollapsed}">${icon('panel-left')}</button><span>워크스페이스 <span class="muted">/</span> ${escape(vm.store?.name??'점포 운영')}</span></div><div class="topbar-actions">${badge(SYNTHETIC,'synthetic')}${badge('JEV 보류')}${button(owner?'매니저 화면':'점주 화면',owner?'role-manager':'role-owner',{className:'role-button'})}</div></header>
       ${vm.error ? `<div class="error-banner" role="alert"><strong>진행 상태를 확인해 주세요.</strong> ${escape(vm.error)}</div>` : ''}
       ${content}
       <footer class="page-footer"><span>GS2500 · 점포와 함께 결정하는 다음 진열</span><span><a href="/demo/" target="_blank" rel="noopener">원본 3D 실험실 ↗</a> · <a href="/storyboard.html" target="_blank" rel="noopener">콘티 ↗</a></span><span>같은 브라우저 안의 로컬 데모 · 실제 문자·발주 없음</span></footer>
+      </div>
     </main>
+    <nav class="ob-mobile-nav" aria-label="모바일 빠른 메뉴"><button type="button" data-action="open-sidebar" aria-controls="workspace-sidebar" aria-expanded="${Boolean(vm.mobileSidebarOpen)}">${icon('menu')}<span>메뉴</span></button>${button(icon(owner?'home':'plus')+(owner?'매니저':'관찰 기록'),owner?'role-manager':'open-observation',{className:'ob-mobile-primary'})}</nav>
     ${vm.approvalOpen ? approvalDialog(vm) : ''}
+    ${vm.observationOpen ? renderObservationDialog(vm) : ''}
+    ${vm.searchOpen ? renderSearchDialog(vm) : ''}
   </div>`;
 }
 function topline(vm) {
@@ -140,15 +150,14 @@ function bay(vm) {
     <div class="transition-title"><div>${small('AS-IS')}<span>현재 본사 표준 진열</span></div><span class="transition-arrow">→</span><div>${small('TO-BE')}<h1>${escape(vm.candidate.name)}</h1></div></div>
     <div class="bay-detail-layout">${referencePhoto()}<div>${evidence(vm)}<div class="section-heading"><h2>작게 바꿔 볼 수 있는 후보</h2><span class="mono muted">${vm.bay.candidates.length} OPTIONS</span></div>${optionCards(vm)}<p class="micro">후보를 고르면 아래 선반 도식이 바뀝니다. 아직 승인되거나 점주에게 전달되지 않습니다.</p>${stockWarnings(vm)}</div></div>
     <div class="section-heading"><h2>같은 상품, 다른 위치</h2><span class="mono muted">${changes(vm).length} SKU 위치 변경 · 4단</span></div><div class="shelf-comparison">${shelf(vm,true)}${shelf(vm)}</div>
-    <div class="action-bar"><p>다른 점포와 후보도 함께 비교한 뒤 결정하세요.</p>${button('목록으로 · 전체 비교 실행','navigate',{className:'button primary',data:{route:'bays'}})}</div>`;
+    <div class="action-bar"><p>같은 고객·재고 조건으로 현재 진열과 후보를 바로 비교하세요.</p>${findResult(vm)?.completed?button('계산된 후보 비교로 이어가기','navigate',{className:'button primary',data:{route:'board'}}):button(vm.busy?'계산 중…':'로컬 규칙으로 30일 비교 시작','run-all',{className:'button primary',disabled:vm.busy})}</div>`;
 }
 function board(vm) {
   const ready=vm.bays.filter(bay=>findResult(vm,bay.storeId,bay.id)?.completed).length;
-  return heading('SIMULATION BOARD · SAME RECORD','여러 점포, 여러 선택을 한눈에','같은 잠재 고객·재고·행사 조건에서 진열안을 비교합니다. 기록된 구매와 상품 위치를 한 카드에서 확인하세요.',button('매대 목록','navigate',{data:{route:'bays'}}))+
-    `<div class="board-status"><span class="status-dot ${vm.busy?'working':''}"></span><strong>${vm.busy?'30일 구매·재고 기록 계산 중':`${ready} / ${vm.bays.length} 매대 비교 준비`}</strong><span class="mono">${escape(vm.progressLabel ?? '동일 시드 · 동일 재고 · 같은 잠재 수요')}</span>${badge('로컬 판단 · JEV 미호출')}</div>
-    <div class="model-seam simulation-contract"><strong>하나의 계산, 두 가지 보기</strong><span><b>30일 예상</b>은 전체 가상 결제 합계 · <b>3D</b>는 선택한 날의 대표 방문 재생입니다. 장면의 배속·체류 연출은 구매 결과를 바꾸지 않습니다.</span></div>
-    <section id="world-board" class="world-board" aria-label="점포별 3D 시뮬레이션 전광판"><div class="world-placeholder"><span class="loading-ring"></span><p>구매 기록과 3D 진열을 연결하고 있습니다.</p></div></section>
-    <details class="forecast-comparisons" open><summary><span><strong>30일 최종 수치 비교표</strong><small>현재 진열 + 후보 ${vm.bays.reduce((sum,bay)=>sum+bay.candidates.length,0)}개 · 대상 24 SKU</small></span><span class="comparison-summary-hint">접기 / 펼치기</span></summary><div class="forecast-tables">${vm.bays.map(bay=>{
+  return heading('LOCAL SIMULATION · 30 DAYS','여러 점포, 여러 선택을 한눈에','점포별 진열안의 30일 예상 매출을 비교합니다.',button('매대·진열안 보기','navigate',{data:{route:'bays'}})+button(vm.busy?'로컬 계산 중…':ready?'조건 다시 계산':'30일 시뮬레이션 시작','run-all',{className:'button primary',disabled:vm.busy}))+
+    `${vm.busy?`<p class="micro simulation-progress" role="status" data-calculation-progress>점포 ${vm.calculationProgress?.completed??0}/${vm.bays.length} 계산 중</p>`:''}
+    <section id="world-board" class="world-board" aria-label="점포별 3D 시뮬레이션 전광판"><div class="world-placeholder"><span class="loading-ring"></span><p>로컬 구매 기록과 3D 진열을 연결하고 있습니다.</p></div></section>
+    <details class="forecast-comparisons" data-ui-key="final-comparisons"><summary><span><strong>30일 최종 수치 비교표</strong><small>현재 진열 + 후보 ${vm.bays.reduce((sum,bay)=>sum+bay.candidates.length,0)}개 · 대상 24 SKU</small></span><span class="comparison-summary-hint">접기 / 펼치기</span></summary><div class="forecast-tables">${vm.bays.map(bay=>{
       const store=storeOf(vm,bay), result=findResult(vm,bay.storeId,bay.id);
       const metricCells=row=>`<td class="mono">${money(row?.revenue)}</td><td class="mono">${money(row?.profit)}</td><td class="mono">${row?number(row.stockoutRate*100)+'%':'—'}</td>`;
       return `<section class="comparison-group"><div class="section-heading"><div><h2>${escape(store?.name)} <span>${escape(bay.name)}</span></h2><p class="micro mono">${escape(store?.id)} · ${escape(bay.id)} · 금액 단위 천원</p></div>${badge('동일 고객·행사 조건')}</div><table class="forecast-table"><caption class="visually-hidden">${escape(store?.name)} 30일 예상 수치와 작업 부담</caption><thead><tr><th scope="col">진열안</th><th scope="col">결제매출</th><th scope="col">매출총이익</th><th scope="col">품절 수요</th><th scope="col">현재 대비</th><th scope="col">작업·발주</th><th scope="col"><span class="visually-hidden">후보 선택</span></th></tr></thead><tbody><tr class="baseline-row"><th scope="row">현재 진열 <small>본사 표준</small></th>${metricCells(result?.baseline)}<td class="mono">기준선</td><td>변경 없음</td><td></td></tr>${bay.candidates.map(candidate=>{
@@ -161,7 +170,9 @@ function candidate(vm) {
   if(!vm.bay||!vm.candidate)return emptySelection();
   const result=selectedResult(vm), comparison=findResult(vm), moved=changes(vm);
   const approved=vm.approval?.storeId===vm.store?.id&&vm.approval?.bayId===vm.bay.id&&vm.approval?.candidateId===vm.candidate.id;
-  return `<div class="breadcrumb">${button('전체 비교 전광판','navigate',{className:'text-button',data:{route:'board'}})}<span>/</span><span>옵션 ${escape(vm.candidate.id)}</span></div>${titleTags(vm)}${heading('CANDIDATE '+vm.candidate.id,escape(vm.candidate.name),escape(vm.candidate.description),approved?badge('매니저 승인됨','positive'):badge('승인 전 · 점주에게 비공개'))}
+  return `<div class="breadcrumb">${button('전체 비교 전광판','navigate',{className:'text-button',data:{route:'board'}})}<span>/</span><span>옵션 ${escape(vm.candidate.id)}</span></div>${titleTags(vm)}${heading('CANDIDATE '+vm.candidate.id,escape(vm.candidate.name),escape(vm.candidate.description),approved?button('승인안 점주 화면에서 확인','role-owner',{className:'button primary'}):badge('승인 전 · 점주에게 비공개'))}
+    <nav class="candidate-switcher" aria-label="이 점포의 후보 비교">${vm.bay.candidates.map(item=>`<button type="button" class="button ${item.id===vm.candidate.id?'primary':''}" data-action="select-candidate" ${attrs(dataFor(vm.bay,item,'candidate'))} aria-pressed="${item.id===vm.candidate.id}">${escape(item.id)} · ${escape(item.name)}</button>`).join('')}<span>같은 재생 시점에서 안만 바꿔 봅니다.</span></nav>
+    ${!result?`<div class="simulation-start-note"><div><strong>아직 계산하지 않은 후보입니다.</strong><p>로컬 규칙으로 4점포의 현재안과 후보를 함께 계산합니다.</p></div>${button(vm.busy?'계산 중…':'30일 시뮬레이션 시작','run-all',{className:'button primary',disabled:vm.busy})}</div>`:''}
     <div class="candidate-main"><section class="world-detail-panel"><div class="panel-heading"><h2>같은 기록으로 보는 진열과 구매</h2><span class="mono">RECORDED VISITS · 대표 재생</span></div><div id="world-detail" class="world-detail" aria-label="선택 후보 3D 시뮬레이션"><div class="world-placeholder"><span class="loading-ring"></span><p>계산된 방문 기록을 연결하고 있습니다.</p></div></div><div class="model-seam">30일 예상과 같은 계산 기록에서 대표 방문을 재생합니다. 동선·체류시간은 시각화이며 구매 결과나 재고를 다시 계산하지 않습니다.</div></section><aside class="candidate-impact"><span class="eyebrow">30일 최종 예상 · 현재 진열 대비</span><div class="impact-number ${tone(result?.deltaPercent)}">${result?percent(result.deltaPercent):'계산 전'}</div><p class="micro">대상 24 SKU · 실제 관측 매출·보장치가 아닙니다.</p><dl><div><dt>현재 진열 예상</dt><dd>${money(comparison?.baseline?.revenue)} <small>천원</small></dd></div><div><dt>선택안 예상</dt><dd>${money(result?.revenue)} <small>천원</small></dd></div><div><dt>예상 매출총이익</dt><dd>${money(result?.profit)} <small>천원</small></dd></div><div><dt>품절 수요 비율</dt><dd>${result?number(result.stockoutRate*100)+'%':'—'}</dd></div></dl><div class="workload"><span>점주 작업 부담</span><strong>약 ${number(vm.candidate.minutes)}분</strong><p>${vm.candidate.orderSkus?.length?`추가 발주 검토 ${vm.candidate.orderSkus.length} SKU · 자동 발주 없음`:'기존 보유 재고 재배치 · 추가 발주 없음'}</p></div>${button(approved?'안내 문구 확인·다시 승인':'이 옵션으로 간다','open-approval',{className:'button primary wide',disabled:!result||vm.busy})}</aside></div>${stockWarnings(vm)}${assumptions(vm)}
     <div class="section-heading"><h2>정확히 어디를 바꾸나요?</h2><span class="mono muted">${moved.length} SKU · 단·열·이웃 반영</span></div><div class="shelf-comparison">${shelf(vm,true)}${shelf(vm)}</div>${evidence(vm,true)}`;
 }
@@ -205,6 +216,6 @@ function emptySelection() {return `<div class="empty"><h1>선택한 매대를 �
 export function renderApp(vm) {
   const safe={stores:[],bays:[],results:{},...vm};
   if(safe.route==='login')return login(safe);
-  const views={home,bays,bay,board,candidate,owner,review};
+  const views={home:renderOperationsOverview,portfolio:home,operations:renderOperationsHistory,recommendations:renderRecommendations,evidence:renderEvidence,bays,bay,board,candidate,owner,review};
   return shell(safe,(views[safe.route]??home)(safe));
 }
